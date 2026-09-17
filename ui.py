@@ -312,7 +312,7 @@ class MainWindow(QMainWindow):
         self.skip_buy_button.clicked.connect(self.decline_pending_asset)
         self.skip_buy_button.setEnabled(False)
         cb.addWidget(self.skip_buy_button)
-        b3 = QPushButton("运行至你的回合"); b3.clicked.connect(self.run_bots); cb.addWidget(b3)
+        b3 = QPushButton("结束回合并运行 AI"); b3.clicked.connect(self.run_bots); cb.addWidget(b3)
         b4 = QPushButton("模拟 30 回合"); b4.clicked.connect(lambda: self.run_bots(limit=30)); cb.addWidget(b4)
         log_title = QLabel("事件记录")
         log_title.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 12px;")
@@ -399,6 +399,11 @@ class MainWindow(QMainWindow):
             self.status.setText("请先决定是否购买当前地产")
             return
         self.status.setText("AI 行动中…")
+        if self._is_human_turn():
+            self._act_current()
+            if self.game.pending_purchase is not None or self.game.is_won():
+                self._after_step()
+                return
         for _ in range(limit):
             if self.game.is_won() or self._remaining() == 0:
                 break
