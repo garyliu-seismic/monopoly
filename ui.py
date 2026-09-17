@@ -512,6 +512,8 @@ class MainWindow(QMainWindow):
         self.human_index: int = 0
         self._player_panels: List[PlayerPanel] = []
         self._played_log_count = 0
+        self._human_log_marker = 0
+        self._show_human_report = False
         self._build_menu()
         self._build_body()
 
@@ -720,21 +722,27 @@ class MainWindow(QMainWindow):
             self.status.setText("请先运行 AI 至你的回合")
             return
         self.status.setText("你正在行动")
+        self._human_log_marker = len(self.game.log)
         self._act_current()
+        self._show_human_report = True
         self._after_step()
         if self.game.pending_purchase is None and self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def buy_pending_asset(self) -> None:
-        if self.game and self.game.buy_pending_asset(self.game.players[self.human_index]):
-            self.status.setText("购买完成，AI 行动中…")
+        if self.game:
+            self._human_log_marker = len(self.game.log)
+            self.game.buy_pending_asset(self.game.players[self.human_index])
+            self._show_human_report = True
         self._after_step()
         if self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def decline_pending_asset(self) -> None:
-        if self.game and self.game.decline_pending_asset(self.game.players[self.human_index]):
-            self.status.setText("已放弃购买，AI 行动中…")
+        if self.game:
+            self._human_log_marker = len(self.game.log)
+            self.game.decline_pending_asset(self.game.players[self.human_index])
+            self._show_human_report = True
         self._after_step()
         if self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
@@ -772,16 +780,59 @@ class MainWindow(QMainWindow):
         self.stock_panel.refresh()
         self.bank_panel.refresh()
         self._play_sounds_for_new_logs()
-        if self.game and self._human_bankrupt():
-            self.status.setText("你破产了！游戏结束")
-        elif self.game and self.game.is_won():
-            self.status.setText("游戏结束 · " + (self.game.winner.name or "") + " 获胜!")
-        elif self.game and self.game.pending_purchase is not None:
-            _, tile = self.game.pending_purchase
-            self.status.setText(f"你到达 {tile.name}，售价 ¥{tile.price}")
-        else:
-            self.status.setText("轮到你行动")
+        self._update_status()
         self._refresh_purchase_controls()
+
+    _REPORT_EMOJI = {
+        "roll": "🎲", "起点奖金": "🎉", "税收": "💰", "rent": "💸",
+        "buy": "🏠", "build": "🏗️", "机会": "🎁", "社区": "🎁",
+        "银行": "🏦", "坐牢": "🔒", "牢房": "🔒", "出狱": "🔓",
+        "股票": "📈", "结束": "🏆", "地产": "📍",
+    }
+
+    def _human_report(self, exclude_buy_offer: bool = False) -> str:
+        """Summarise the human player's latest action (roll + outcomes)."""
+        human = self.game.players[self.human_index]
+        tile = self.game.board.tile_by_index(human.position)
+        lines: List[str] = []
+        others: List[str] = []
+        for phase, text in self.game.log[self._human_log_marker:]:
+            if human.name not in text:
+                continue
+            if exclude_buy_offer and phase == "buy" and "可购买" in text:
+                continue
+            short = text.replace(human.name + " ", "", 1)
+            emoji = self._REPORT_EMOJI.get(phase, "•")
+            if phase == "roll":
+                lines.append(f"{emoji} {short}")
+            else:
+                others.append(f"{emoji} {short}")
+        lines.append(f"📍 走到 {tile.name}")
+        lines.extend(others)
+        lines.append(f"💵 现金：¥{human.money}")
+        return "\n".join(lines)
+
+    def _update_status(self) -> None:
+        if self.game is None:
+            return
+        human = self.game.players[self.human_index]
+        cash = f"💵 现金：¥{human.money}"
+        if self._human_bankrupt():
+            self.status.setText("你破产了！游戏结束")
+            return
+        if self.game.is_won():
+            self.status.setText(f"游戏结束 · {self.game.winner.name} 获胜!\n{cash}")
+            return
+        if self.game.pending_purchase is not None:
+            _, tile = self.game.pending_purchase
+            self.status.setText(f"🏠 可购买 {tile.name}（¥{tile.price}）\n{self._human_report(exclude_buy_offer=True)}")
+            self._show_human_report = False
+            return
+        if self._show_human_report:
+            self._show_human_report = False
+            self.status.setText(self._human_report())
+        else:
+            self.status.setText(f"轮到你行动\n{cash}")
 
     _PHASE_SOUNDS = {
         "roll": "roll",
