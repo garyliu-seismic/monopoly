@@ -34,11 +34,14 @@ class Player:
     jail_counter: int = 0
     jail_turn: int = 0
     position: int = 0
+    initial_money: int = 0
     wallets: List[Wallet] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if len(self.wallets) < self.holds:
             self.wallets = _new_wallets(self.holds)
+        if self.initial_money <= 0:
+            self.initial_money = sum(w.money_value for w in self.wallets)
 
     # --------------------------------------------------------------- money
     @property
@@ -156,6 +159,7 @@ class Player:
             "jail_counter": self.jail_counter,
             "jail_turn": self.jail_turn,
             "position": self.position,
+            "initial_money": self.initial_money,
             "wallets": [w.to_dict() for w in self.wallets],
         }
 
@@ -173,9 +177,12 @@ class Player:
             jail_counter=data.get("jail_counter", 0),
             jail_turn=data.get("jail_turn", 0),
             position=data.get("position", 0),
+            initial_money=data.get("initial_money", 0),
         )
         p.stocks = {str(k): int(v) for k, v in data.get("stocks", {}).items()}
         p.wallets = [Wallet.from_dict(w) for w in data.get("wallets", [])]
+        if p.initial_money <= 0:
+            p.initial_money = sum(w.money_value for w in p.wallets)
         return p
 
 

@@ -347,3 +347,12 @@ def test_rent_scales_with_houses():
     base = g.board.tiles[6].price // 10  # 150
     expected = base * (1 + 2 * 1)        # 450
     assert visitor.money == 100000 - expected
+
+
+def test_player_initial_money_recorded_and_serialised():
+    p = Player("P1", holds=2)
+    assert p.initial_money == 1800
+    p.set_money(500)
+    assert p.initial_money == 1800  # 初始资金不随 set_money 改变
+    restored = Player.from_dict(p.to_dict())
+    assert restored.initial_money == 1800

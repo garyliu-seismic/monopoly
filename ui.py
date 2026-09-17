@@ -286,16 +286,17 @@ def _phase_color(phase: str) -> str:
 
 
 class PlayerPanel(QWidget):
-    """One player's card on the left: 姓名/现金/地产数量/地产明细."""
+    """One player's card on the left: 姓名/初始资金/现金/地产/股票/净资产."""
 
     def __init__(self, player: Player, board: Board, is_human: bool, parent=None,
-                 avatar: str = "🧑", color: str = "#555"):
+                 avatar: str = "🧑", color: str = "#555", stock_market=None):
         super().__init__(parent)
         self.player = player
         self.board = board
         self.is_human = is_human
         self.avatar = avatar
-        self.setMinimumHeight(104)
+        self.stock_market = stock_market
+        self.setMinimumHeight(118)
         self.setStyleSheet("PlayerPanel { background: #ffffff; border: 1px solid #d5e0d6; border-radius: 6px; }")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -306,6 +307,9 @@ class PlayerPanel(QWidget):
         layout.addWidget(title)
         self.info = QLabel("现金 ¥0 · 地产 0 块")
         layout.addWidget(self.info)
+        self.meta = QLabel("初始 ¥0 · 净资产 ¥0")
+        self.meta.setStyleSheet("QLabel { color: #176d5b; font-size: 11px; font-weight: bold; }")
+        layout.addWidget(self.meta)
         self.props = QLabel("（暂无）")
         self.props.setWordWrap(True)
         self.props.setStyleSheet("QLabel { color: #555; font-size: 11px; }")
@@ -317,9 +321,22 @@ class PlayerPanel(QWidget):
         """Only updates text; card lives in the grid as a widget."""
         p = self.player
         tag = "破产" if p.bankrupt else ("在狱" if p.in_prison else "")
-        names = [self.board.tiles[i].name for i in p.properties]
-        self.info.setText(f"cash ¥{p.money} · 地产 {len(p.properties)} · {tag}")
-        self.props.setText(" / ".join(names) if names else "（暂无）")
+        prop_value = sum(self.board.tiles[i].price for i in p.properties)
+        stock_value = 0
+        if self.stock_market is not None:
+            stock_value = sum(
+                s.price * p.stocks.get(s.code, 0) for s in self.stock_market.stocks
+            )
+        net = p.money + prop_value + stock_value
+        self.info.setText(f"现金 ¥{p.money} · 地产 {len(p.properties)} 块 · {tag}")
+        self.meta.setText(f"初始 ¥{p.initial_money} · 净资产 ¥{net}")
+        parts = [self.board.tiles[i].name for i in p.properties]
+        if p.stocks and self.stock_market is not None:
+            for s in self.stock_market.stocks:
+                n = p.stocks.get(s.code, 0)
+                if n:
+                    parts.append(f"📈{s.name}×{n}")
+        self.props.setText(" / ".join(parts) if parts else "（暂无）")
 
 
 class StockPanel(QWidget):
@@ -568,6 +585,7 @@ class MainWindow(QMainWindow):
                 self.players_grid.parentWidget(),
                 avatar=PLAYER_AVATARS[i % len(PLAYER_AVATARS)],
                 color=PLAYER_COLORS[i % len(PLAYER_COLORS)],
+                stock_market=self.game.stock_market,
             )
             self.players_grid.addWidget(panel, i, 0, 1, -1)
             self._player_panels.append(panel)
