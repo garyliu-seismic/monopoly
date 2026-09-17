@@ -284,7 +284,7 @@ class MainWindow(QMainWindow):
         players_title = QLabel("玩家资产")
         players_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #176d5b;")
         left_layout.addWidget(players_title)
-        self.players_grid = QGridLayout(left)
+        self.players_grid = QGridLayout()
         left_layout.addLayout(self.players_grid)
         left_layout.addStretch()
         box.addWidget(left)
@@ -380,18 +380,24 @@ class MainWindow(QMainWindow):
         self.status.setText("你正在行动")
         self._act_current()
         self._after_step()
+        if self.game.pending_purchase is None and not self.game.is_won():
+            QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def buy_pending_asset(self) -> None:
         if self.game and self.game.buy_pending_asset(self.game.players[self.human_index]):
-            self.status.setText("购买完成，选择运行 AI 或继续查看棋盘")
+            self.status.setText("购买完成，AI 行动中…")
         self._after_step()
+        if self.game and not self.game.is_won():
+            QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def decline_pending_asset(self) -> None:
         if self.game and self.game.decline_pending_asset(self.game.players[self.human_index]):
-            self.status.setText("已放弃购买，选择运行 AI 继续")
+            self.status.setText("已放弃购买，AI 行动中…")
         self._after_step()
+        if self.game and not self.game.is_won():
+            QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
-    def run_bots(self, limit: int = 10000) -> None:
+    def run_bots(self, limit: int = 10000, start_with_human: bool = True) -> None:
         if not self.game:
             self.status.setText("请先开始游戏")
             return
@@ -399,7 +405,7 @@ class MainWindow(QMainWindow):
             self.status.setText("请先决定是否购买当前地产")
             return
         self.status.setText("AI 行动中…")
-        if self._is_human_turn():
+        if start_with_human and self._is_human_turn():
             self._act_current()
             if self.game.pending_purchase is not None or self.game.is_won():
                 self._after_step()
