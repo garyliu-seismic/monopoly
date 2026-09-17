@@ -38,9 +38,9 @@ def test_dice_distribution_range():
         assert len(d.values) == 2
 
 
-def test_board_has_34_tiles_and_grid():
-    b = board_mod.Board(34)
-    assert len(b.tiles) == 34
+def test_board_has_40_tiles_and_grid():
+    b = board_mod.Board(40)
+    assert len(b.tiles) == 40
     assert b.tiles[0].category == TileType.GO
     for t in b.tiles:
         assert t.tile == b.tiles.index(t)
@@ -48,15 +48,15 @@ def test_board_has_34_tiles_and_grid():
 
 
 def test_board_grid_is_a_continuous_monopoly_perimeter():
-    b = board_mod.Board(34)
+    b = board_mod.Board(40)
     positions = list(b.grid.values())
 
-    assert len(set(positions)) == 34
+    assert len(set(positions)) == 40
     assert b.grid[0] == (0, 0)
-    assert b.grid[9] == (0, 9)
-    assert b.grid[17] == (8, 9)
-    assert b.grid[26] == (8, 0)
-    assert all(row in (0, 8) or col in (0, 9) for row, col in positions)
+    assert b.grid[10] == (0, 10)
+    assert b.grid[20] == (10, 10)
+    assert b.grid[30] == (10, 0)
+    assert all(row in (0, 10) or col in (0, 10) for row, col in positions)
 
 
 def test_full_run_completes_without_crash_and_conserves_money():
@@ -111,14 +111,14 @@ def test_railroads_are_purchasable_and_collect_scaled_rent():
     owner.set_money(10000)
     visitor.set_money(10000)
 
-    for tile_index in (5, 17):
+    for tile_index in (5, 15):
         owner.position = tile_index
         g._land(owner)
 
     visitor.position = 5
     g._land(visitor)
 
-    assert owner.properties == [5, 17]
+    assert owner.properties == [5, 15]
     assert visitor.money == 9900
     assert owner.money == 9100
 
@@ -129,7 +129,7 @@ def test_utilities_collect_rent_from_roll_and_full_set():
     owner.set_money(10000)
     visitor.set_money(10000)
 
-    for tile_index in (12, 25):
+    for tile_index in (12, 28):
         owner.position = tile_index
         g._land(owner)
 
@@ -137,7 +137,7 @@ def test_utilities_collect_rent_from_roll_and_full_set():
     visitor.position = 12
     g._land(visitor)
 
-    assert owner.properties == [12, 25]
+    assert owner.properties == [12, 28]
     assert visitor.money == 9930
     assert owner.money == 6570
 
@@ -315,3 +315,35 @@ def test_save_load_roundtrip():
     assert [t.owner for t in g2.board.tiles] == [t.owner for t in g.board.tiles]
     # 加载后仍可继续运行
     g2.run(steps=3)
+
+
+def test_build_house_on_three_property_group():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(100000)
+    for idx in (6, 8, 9):  # lightblue 三块
+        p.position = idx
+        g._land(p)
+    # 踩到自己地产，拥有全集团 → 盖房
+    p.position = 6
+    g._land(p)
+    assert g.board.tiles[6].house == 1
+
+
+def test_rent_scales_with_houses():
+    g = make_game(n=2)
+    owner, visitor = g.players
+    owner.set_money(100000)
+    visitor.set_money(100000)
+    for idx in (6, 8, 9):
+        owner.position = idx
+        g._land(owner)
+    owner.position = 6
+    g._land(owner)
+    assert g.board.tiles[6].house == 1
+
+    visitor.position = 6
+    g._land(visitor)
+    base = g.board.tiles[6].price // 10  # 150
+    expected = base * (1 + 2 * 1)        # 450
+    assert visitor.money == 100000 - expected

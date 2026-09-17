@@ -1,9 +1,10 @@
 """The Monopoly board.
 
-A Monopoly board is a list of 34 ``Tile`` records. We build the canonical
-大富翁 (Richman 4) 34-grid layout: ``tiles`` is linear (index == tile
-ordinal), which is all the engine needs for walking/rent. ``grid`` keeps the
-x/y grid position for painting only.
+A Monopoly board is a list of 40 ``Tile`` records arranged in the classic
+大富翁 / Monopoly ring: 8 colour groups, 4 railroads, 2 utilities, 3 chance,
+3 community-chest, 2 tax tiles and the 4 corner tiles. ``tiles`` is linear
+(index == tile ordinal), which is all the engine needs for walking/rent;
+``grid`` keeps the x/y grid position for painting only.
 """
 from __future__ import annotations
 
@@ -63,48 +64,55 @@ class Tile:
         )
 
 
-# (name, category, group, price) in 大富翁 order; the engine dispatches the
-# remaining categories (CHANCE/COMMUNITY/TAX/... ).
+# (name, category, group, price) — classic 40-tile layout with Taiwanese
+# city names. 8 property groups: brown(2), lightblue(3), pink(3), orange(3),
+# red(3), yellow(3), green(3), darkblue(2).
 _DEFINITIONS = [
-    ("起点", TileType.GO, "", 0),
-    ("台北", TileType.PROPERTY, "brown", 1500),
-    ("机会", TileType.CHANCE, "", 0),
-    ("高雄", TileType.PROPERTY, "brown", 2000),
-    ("台北机场", TileType.TAX, "", 200),
-    ("铁路1", TileType.RAILROAD, "railroad", 500),
-    ("桃园", TileType.PROPERTY, "lightblue", 1500),
-    ("社区", TileType.COMMUNITY, "", 0),
-    ("台中", TileType.PROPERTY, "lightblue", 2000),
-    ("新竹", TileType.PROPERTY, "lightblue", 2500),
-    ("监狱", TileType.GO_JAIL, "", 0),
-    ("银行", TileType.GANBANG, "", 0),
-    ("电力公司", TileType.UTILITY, "utility", 1500),
-    ("台北大桥", TileType.PROPERTY, "pink", 3000),
-    ("机会", TileType.CHANCE, "", 0),
-    ("台南", TileType.PROPERTY, "pink", 3500),
-    ("台中机场", TileType.TAX, "", 0),
-    ("铁路2", TileType.RAILROAD, "railroad", 500),
-    ("嘉义", TileType.PROPERTY, "pink", 4000),
-    ("免费停车", TileType.FREE, "", 0),
-    ("牢房", TileType.JAIL, "", 0),
-    ("社区", TileType.COMMUNITY, "", 0),
-    ("高雄机场", TileType.TAX, "", 0),
-    ("南港", TileType.PROPERTY, "orange", 5000),
-    ("强盗集团", TileType.COMMUNITY, "", 0),
-    ("瓦斯公司", TileType.UTILITY, "utility", 2000),
-    ("高雄大桥", TileType.PROPERTY, "orange", 5500),
-    ("机会", TileType.CHANCE, "", 0),
-    ("高雄", TileType.PROPERTY, "orange", 6000),
-    ("自由广场", TileType.SPECIAL, "", 0),
-    ("前往牢房", TileType.FREE, "", 0),
-    ("铁路3", TileType.RAILROAD, "railroad", 500),
-    ("台北机场", TileType.PROPERTY, "yellow", 7000),
-    ("社区", TileType.COMMUNITY, "", 0),
+    ("起点", TileType.GO, "", 0),                      # 0
+    ("基隆", TileType.PROPERTY, "brown", 1500),        # 1
+    ("社区", TileType.COMMUNITY, "", 0),               # 2
+    ("苗栗", TileType.PROPERTY, "brown", 2000),        # 3
+    ("所得税", TileType.TAX, "", 200),                 # 4
+    ("台北车站", TileType.RAILROAD, "railroad", 500),  # 5
+    ("彰化", TileType.PROPERTY, "lightblue", 1500),    # 6
+    ("机会", TileType.CHANCE, "", 0),                  # 7
+    ("云林", TileType.PROPERTY, "lightblue", 2000),    # 8
+    ("嘉义", TileType.PROPERTY, "lightblue", 2500),    # 9
+    ("监狱", TileType.JAIL, "", 0),                    # 10
+    ("屏东", TileType.PROPERTY, "pink", 3000),         # 11
+    ("电力公司", TileType.UTILITY, "utility", 1500),   # 12
+    ("台东", TileType.PROPERTY, "pink", 3500),         # 13
+    ("宜兰", TileType.PROPERTY, "pink", 4000),         # 14
+    ("台中车站", TileType.RAILROAD, "railroad", 500),  # 15
+    ("花莲", TileType.PROPERTY, "orange", 5000),       # 16
+    ("社区", TileType.COMMUNITY, "", 0),               # 17
+    ("南投", TileType.PROPERTY, "orange", 5500),       # 18
+    ("台中", TileType.PROPERTY, "orange", 6000),       # 19
+    ("免费停车", TileType.FREE, "", 0),                # 20
+    ("台南", TileType.PROPERTY, "red", 7000),          # 21
+    ("机会", TileType.CHANCE, "", 0),                  # 22
+    ("新竹", TileType.PROPERTY, "red", 7500),          # 23
+    ("桃园", TileType.PROPERTY, "red", 8000),          # 24
+    ("高雄车站", TileType.RAILROAD, "railroad", 500),  # 25
+    ("高雄", TileType.PROPERTY, "yellow", 9000),       # 26
+    ("台北", TileType.PROPERTY, "yellow", 9500),       # 27
+    ("自来水公司", TileType.UTILITY, "utility", 2000),  # 28
+    ("新北", TileType.PROPERTY, "yellow", 10000),      # 29
+    ("前往牢房", TileType.GO_JAIL, "", 0),             # 30
+    ("板桥", TileType.PROPERTY, "green", 11000),       # 31
+    ("中和", TileType.PROPERTY, "green", 11500),       # 32
+    ("社区", TileType.COMMUNITY, "", 0),               # 33
+    ("三重", TileType.PROPERTY, "green", 12000),       # 34
+    ("花莲车站", TileType.RAILROAD, "railroad", 500),  # 35
+    ("机会", TileType.CHANCE, "", 0),                  # 36
+    ("信义", TileType.PROPERTY, "darkblue", 15000),    # 37
+    ("奢侈税", TileType.TAX, "", 500),                 # 38
+    ("大安", TileType.PROPERTY, "darkblue", 20000),    # 39
 ]
 
 
 class Board:
-    def __init__(self, size: int = 34, rng: random.Random | None = None):
+    def __init__(self, size: int = 40, rng: random.Random | None = None):
         self.size = size
         self.tiles: List[Tile] = []
         for i in range(size):
@@ -137,34 +145,33 @@ class Board:
 
 
 def _grid(size: int) -> Dict[int, tuple[int, int]]:
-    """Loop the tiles out around a rectangular perimeter (a Monopoly ring).
+    """Loop the tiles out around an 11×11 perimeter (a classic Monopoly ring).
 
     ``grid[tile]`` maps a tile ordinal to a ``(row, col)`` cell so the UI can
     paint the board as a ring rather than a plain table.
 
-    The 34 tiles form the full perimeter of a 10 by 9 board: 10 across the
-    bottom, 8 up the right edge, 9 across the top, then 7 down the left edge.
-    This produces a balanced, traditional Monopoly-style board with a large
-    central play area.
+    The 40 tiles form the full perimeter of an 11×11 board: 11 across the
+    bottom, 10 up the right edge, 10 across the top, then 9 down the left
+    edge (corners counted once).
     """
     if size < 0:
         return {}
     coords: list[tuple[int, int]] = []
-    # bottom row: left to right
-    for c in range(10):
+    # bottom row: left to right (11 cells)
+    for c in range(11):
         coords.append((0, c))
-    # right column: up from bottom-right
-    for r in range(1, 9):
-        coords.append((r, 9))
-    # top row: right to left, excluding the top-right corner
-    for c in range(8, -1, -1):
-        coords.append((8, c))
-    # left column: down from top-left, excluding both corners
-    for r in range(7, 0, -1):
+    # right column: up from bottom-right corner (10 cells)
+    for r in range(1, 11):
+        coords.append((r, 10))
+    # top row: right to left, excluding the top-right corner (10 cells)
+    for c in range(9, -1, -1):
+        coords.append((10, c))
+    # left column: down from top-left, excluding both corners (9 cells)
+    for r in range(9, 0, -1):
         coords.append((r, 0))
     assert len(coords) >= size, coords
     return {i: coords[i] for i in range(size)}
 
 
-def build_board(size: int = 34, rng: random.Random | None = None) -> Board:
+def build_board(size: int = 40, rng: random.Random | None = None) -> Board:
     return Board(size=size, rng=rng)

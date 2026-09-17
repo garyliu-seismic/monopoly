@@ -16,7 +16,7 @@ monopoly/
 │   ├── player.py    #   Player: 现金 / 持有地产 / 住房 / 牢房 / 破产 / 股票
 │   ├── dice.py      #   骰子 roll / 校验
 │   ├── tile_types.py#   地图格子类型枚举 (TileType)
-│   ├── board.py     #   地图 (34 格) / 格子所有权
+│   ├── board.py     #   地图 (40 格) / 格子所有权
 │   ├── events.py    #   随机事件表 (机会 / 命运 / 强盗集团 / 监狱)
 │   ├── jail.py      #   监狱 / 进房规则 (入狱、掷骰出狱、赎金)
 │   ├── stock.py     #   股票市场 (股价随机游走、买卖)
@@ -45,8 +45,8 @@ monopoly/
 ## 核心玩法
 
 - **骰子行进**：玩家掷骰子，沿大富翁地图行进 N 格，经过起点额外 +¥100。
-- **买地收租**：踩到未持有地产可购买；被他人地产踩中需缴纳租金（拥有全集团可建房子，租金翻倍）。
-- **建房子**：同属一个集团的地产全部拥有且房屋数量为 0 时，可用半价（`price * 0.5`）建房。
+- **买地收租**：踩到未持有地产可购买；被他人地产踩中需缴纳租金（拥有全集团可盖房，房屋越多租金越高）。
+- **盖房子**：同属一个集团的地产全部拥有时，每次踩到自己的地产可建 1 栋房（上限 4 栋，每栋花费 `price * 0.5`），租金随房屋数量增长（`rent = price/10 × (1 + 2×house)`）。
 - **随机事件**：机会 / 命运卡片（`money_get` / `bank_lotto` 等），以及强盗集团抢劫。
 - **监狱 / 进房**：停靠在"进房"（GO_JAIL）触放入狱；入狱后掷骰得到对子立刻出狱，否则按天累计，满 `JAIL_MAX_TURNS`（3 天）后可支付 `BAIL_COST`（50 元）赎金出狱，无力支付则再停留一天。
 - **税收**：经过"税收"格按固定金额缴税。
@@ -82,7 +82,7 @@ pytest test_core.py -v
 
 - `test_wallet_transfer_and_spend` — Wallet 转账 / 玩家消费至破产
 - `test_dice_distribution_range` — 骰子分布 (2..12)
-- `test_board_has_34_tiles_and_grid` — 地图 34 格 + GO 首格
+- `test_board_has_40_tiles_and_grid` — 地图 40 格 + GO 首格
 - `test_full_run_completes_without_crash_and_conserves_money` — 整局运行
 - `test_bankrupt_player_drops_out` — 破产玩家出局、判定赢家
 - `test_buy_property_when_wealthy` — 富豪玩家购买地产

@@ -44,7 +44,7 @@ class Game:
         auto_buy: bool = True,
     ) -> None:
         self.log: Log = []
-        self.board: Board = board or Board(34)
+        self.board: Board = board or Board()
         self.players: List[Player] = list(players)
         self.max_turns = max_turns
         self.auto_buy = auto_buy
@@ -198,13 +198,15 @@ class Game:
             if player.can_pay(t.price):
                 self._buy_asset(player, t)
             return
-        if t.owner != player.name:
-            if self._owns_group(player, t.group) and t.house == 0:
+        if t.owner == player.name:
+            # 自己的地：拥有整个集团且房屋未满时可继续盖房
+            if self._owns_group(player, t.group) and t.house < 4:
                 self._build_house(player, t)
             else:
-                self._pay_rent(player, t)
-        elif t.house == 0 and self._owns_group(player, t.group):
-            self._build_house(player, t)
+                self.add_log("地产", f"{player.name} 回到自己的地产 {t.name}")
+            return
+        # 别人的地：交租
+        self._pay_rent(player, t)
 
     def _should_bot_buy(self, player: Player, t: object) -> bool:
         if not player.can_pay(t.price):
@@ -253,14 +255,16 @@ class Game:
             self._collect_rent(player, t.owner, multiplier * sum(self._last_roll))
 
     def _buy_asset(self, player: Player, t: object) -> bool:
+        """Purchase an unowned tile; returns True only when it succeeds."""
         if t.owner is not None:
             return False
-        if player.can_pay(t.price):
-            t.owner = player.name
-            t.house = 0
-            player.pay(t.price)
-            player.properties.append(t.tile)
-            self.add_log("buy", f"{player.name} 购买 {t.name}（-{t.price}）")
+        if not player.can_pay(t.price):
+            return False
+        t.owner = player.name
+        t.house = 0
+        player.pay(t.price)
+        player.properties.append(t.tile)
+        self.add_log("buy", f"{player.name} 购买 {t.name}（-{t.price}）")
         return True
 
     def buy_pending_asset(self, player: Player) -> bool:
@@ -367,13 +371,13 @@ class Game:
             self.log.extend(result)
 
     def _owns_group(self, player: Player, group: str) -> bool:
+        if not group:
+            return False
         group_tiles = [
-            self.board.tiles[i]
-            for i in range(34)
-            if self.board.tiles[i].category == TileType.PROPERTY
-            and self.board.tiles[i].group == group
+            t for t in self.board.tiles
+            if t.category == TileType.PROPERTY and t.group == group
         ]
-        return len(group_tiles) == 2 and all(t.owner == player.name for t in group_tiles)
+        return len(group_tiles) > 0 and all(t.owner == player.name for t in group_tiles)
 
     def _check_bankrupt(self) -> None:
         for pl in self.players:

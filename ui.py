@@ -41,7 +41,8 @@ _CATEGORY_COLORS = {
 }
 _GROUP_COLORS = {
     "brown": "#6d4c41", "lightblue": "#4fc3f7", "pink": "#ec407a",
-    "orange": "#ffb300", "yellow": "#fdd835",
+    "orange": "#ffb300", "red": "#e53935", "yellow": "#fdd835",
+    "green": "#43a047", "darkblue": "#1e3a8a",
 }
 PLAYER_COLORS = ["#e53935", "#1e88e5", "#43a047", "#8e24aa"]
 PLAYER_AVATARS = ["🧑", "🤖", "👽", "👻"]
@@ -502,7 +503,7 @@ class MainWindow(QMainWindow):
         left_layout.addStretch()
         box.addWidget(left)
 
-        self.board_view = BoardView(Board(34))
+        self.board_view = BoardView(Board())
         box.addWidget(self.board_view, 3)
 
         controls = QFrame(); controls.setMaximumWidth(280)
