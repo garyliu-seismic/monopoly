@@ -578,6 +578,14 @@ class MainWindow(QMainWindow):
     def _remaining(self) -> int:
         return sum(1 for p in self.game.players if not p.bankrupt)
 
+    def _human_bankrupt(self) -> bool:
+        """True when the human player is out of the game."""
+        return self.game is not None and self.game.players[self.human_index].bankrupt
+
+    def _auto_run_allowed(self) -> bool:
+        """True when the AI may keep running (game alive and human still in)."""
+        return self.game is not None and not self.game.is_won() and not self._human_bankrupt()
+
     def _act_current(self) -> None:
         """Advance exactly one active player (roll, move, resolve, draw)."""
         if self.game.is_won():
@@ -593,6 +601,9 @@ class MainWindow(QMainWindow):
     def step(self):
         if not self.game:
             self.status.setText("请先开始游戏"); return
+        if self._human_bankrupt():
+            self.status.setText("你已破产，游戏结束")
+            return
         if self._remaining() == 0:
             return
         if self.game.pending_purchase is not None:
@@ -604,21 +615,21 @@ class MainWindow(QMainWindow):
         self.status.setText("你正在行动")
         self._act_current()
         self._after_step()
-        if self.game.pending_purchase is None and not self.game.is_won():
+        if self.game.pending_purchase is None and self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def buy_pending_asset(self) -> None:
         if self.game and self.game.buy_pending_asset(self.game.players[self.human_index]):
             self.status.setText("购买完成，AI 行动中…")
         self._after_step()
-        if self.game and not self.game.is_won():
+        if self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def decline_pending_asset(self) -> None:
         if self.game and self.game.decline_pending_asset(self.game.players[self.human_index]):
             self.status.setText("已放弃购买，AI 行动中…")
         self._after_step()
-        if self.game and not self.game.is_won():
+        if self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
 
     def run_bots(self, limit: int = 10000, start_with_human: bool = True) -> None:
@@ -631,11 +642,11 @@ class MainWindow(QMainWindow):
         self.status.setText("AI 行动中…")
         if start_with_human and self._is_human_turn():
             self._act_current()
-            if self.game.pending_purchase is not None or self.game.is_won():
+            if self.game.pending_purchase is not None or self.game.is_won() or self._human_bankrupt():
                 self._after_step()
                 return
         for _ in range(limit):
-            if self.game.is_won() or self._remaining() == 0:
+            if self.game.is_won() or self._remaining() == 0 or self._human_bankrupt():
                 break
             self.game.next_turn()
             current = self.game._current_player()
@@ -653,7 +664,9 @@ class MainWindow(QMainWindow):
             panel.refresh()
         self.stock_panel.refresh()
         self._play_sounds_for_new_logs()
-        if self.game and self.game.is_won():
+        if self.game and self._human_bankrupt():
+            self.status.setText("你破产了！游戏结束")
+        elif self.game and self.game.is_won():
             self.status.setText("游戏结束 · " + (self.game.winner.name or "") + " 获胜!")
         elif self.game and self.game.pending_purchase is not None:
             _, tile = self.game.pending_purchase
