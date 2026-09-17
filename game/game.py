@@ -26,6 +26,7 @@ from game.events import EVENTS
 from game.tile_types import TileType
 from game.stock import StockMarket
 from game.serial import rng_from_json, rng_to_json
+from game.bank import LOAN_LIMIT, LOAN_RATE, deposit_interest, loan_interest
 
 Log = List[Tuple[str, str]]
 
@@ -74,6 +75,8 @@ class Game:
             p.bankrupt = False
             p.in_prison = False
             p.jail_turn = 0
+            p.bank = 0
+            p.loan = 0
         self.add_log("start", f"游戏开始，共 {len(self.players)} 名玩家")
 
     def add_log(self, phase: str, text: str) -> str:
@@ -100,6 +103,7 @@ class Game:
             raise GameOver("turn limit reached, no winner")
         self.turn += 1
         self.stock_market.tick()
+        self.apply_interest()
         n = len(self.players)
         for _ in range(n):
             self.turn_index = (self.turn_index + 1) % n
@@ -146,7 +150,7 @@ class Game:
         return self.log
 
     def roll(self) -> None:
-        pair = roll_pair()
+        pair = roll_pair(self._rng)
         self._last_roll = pair.values
         total = sum(pair.values)
         self.add_log("roll", f"{self._current_player().name} 掷出 {total}")
@@ -156,8 +160,8 @@ class Game:
         after = (before + count) % self.board_size
         player.position = after
         if before + count >= self.board_size:
-            player.add(100)
-            self.add_log("起点奖金", f"{player.name} 经过起点 +¥100")
+            player.add(2500)
+            self.add_log("起点奖金", f"{player.name} 经过起点 +¥2500")
         return after
 
     def _land(self, player: Player) -> None:
@@ -195,7 +199,7 @@ class Game:
                     self.pending_purchase = (player, t)
                     self.add_log("buy", f"{player.name} 可购买 {t.name}（¥{t.price}）")
                 return
-            if player.can_pay(t.price):
+            if self._should_bot_buy(player, t):
                 self._buy_asset(player, t)
             return
         if t.owner == player.name:
@@ -218,19 +222,19 @@ class Game:
         if group_owned:
             return True
         remaining_cash = player.money - t.price
-        reserve = max(200, t.price // 10)
+        reserve = max(4000, t.price // 3)
         return remaining_cash >= reserve and t.price <= player.money * 0.9
 
     def _build_house(self, player: Player, t: object) -> None:
         cost = int(t.price * 0.5)
-        if player.can_pay(cost):
+        if player.can_pay(cost) and player.money - cost >= 3000:
             player.pay(cost)
             t.house += 1
             self.add_log("build", f"{player.name} 为 {t.name} 建房子（-{cost}）")
 
     def _pay_rent(self, player: Player, t: object) -> None:
-        rent = (t.price // 10) * (1 + 2 * t.house)
-        rent = max(rent, t.price // 10)
+        base = t.price // 20
+        rent = base * (1 + 2 * t.house)
         self._collect_rent(player, t.owner, rent)
 
     def _land_railroad(self, player: Player, t: object) -> None:
@@ -241,7 +245,7 @@ class Game:
                 tile.category == TileType.RAILROAD and tile.owner == t.owner
                 for tile in self.board.tiles
             )
-            self._collect_rent(player, t.owner, 50 * owned_railroads)
+            self._collect_rent(player, t.owner, 200 * owned_railroads)
 
     def _land_utility(self, player: Player, t: object) -> None:
         if self._buy_asset(player, t):
@@ -251,7 +255,7 @@ class Game:
                 tile.category == TileType.UTILITY and tile.owner == t.owner
                 for tile in self.board.tiles
             )
-            multiplier = 10 if owned_utilities == 2 else 4
+            multiplier = 100 if owned_utilities == 2 else 40
             self._collect_rent(player, t.owner, multiplier * sum(self._last_roll))
 
     def _buy_asset(self, player: Player, t: object) -> bool:
@@ -317,6 +321,70 @@ class Game:
         self.add_log("股票", f"{player.name} 卖出 {stock.name} ×{shares}（+¥{revenue}）")
         return True, f"卖出 {stock.name} ×{shares}"
 
+    # ------------------------------------------------------------- banking
+    def deposit(self, player: Player, amount: int) -> tuple[bool, str]:
+        """Move cash into the bank account. Returns (ok, message)."""
+        if amount <= 0:
+            return False, "金额无效"
+        if player.money < amount:
+            return False, f"现金不足（现有 ¥{player.money}）"
+        player.pay(amount)
+        player.bank += amount
+        self.add_log("银行", f"{player.name} 存入 ¥{amount}（存款 ¥{player.bank}）")
+        return True, f"存入 ¥{amount}"
+
+    def withdraw(self, player: Player, amount: int) -> tuple[bool, str]:
+        """Move cash out of the bank account. Returns (ok, message)."""
+        if amount <= 0:
+            return False, "金额无效"
+        if player.bank < amount:
+            return False, f"存款不足（现有 ¥{player.bank}）"
+        player.bank -= amount
+        player.add(amount)
+        self.add_log("银行", f"{player.name} 取出 ¥{amount}（存款 ¥{player.bank}）")
+        return True, f"取出 ¥{amount}"
+
+    def borrow(self, player: Player, amount: int) -> tuple[bool, str]:
+        """Borrow cash from the bank (interest accrues every turn)."""
+        if amount <= 0:
+            return False, "金额无效"
+        if player.loan + amount > LOAN_LIMIT:
+            return False, f"超过贷款上限 ¥{LOAN_LIMIT}（已贷 ¥{player.loan}）"
+        player.add(amount)
+        player.loan += amount
+        self.add_log("银行", f"{player.name} 贷款 ¥{amount}（利率 {LOAN_RATE * 100:.0f}%/回合）")
+        return True, f"贷款 ¥{amount}"
+
+    def repay(self, player: Player, amount: int) -> tuple[bool, str]:
+        """Repay (part of) the outstanding loan. Returns (ok, message)."""
+        if amount <= 0:
+            return False, "金额无效"
+        if player.loan <= 0:
+            return False, "没有贷款"
+        amount = min(amount, player.loan)
+        if player.money < amount:
+            return False, f"现金不足（需 ¥{amount}）"
+        player.pay(amount)
+        player.loan -= amount
+        self.add_log("银行", f"{player.name} 还款 ¥{amount}（剩余贷款 ¥{player.loan}）")
+        return True, f"还款 ¥{amount}"
+
+    def apply_interest(self) -> None:
+        """Settle deposit / loan interest for every live player once per turn."""
+        for p in self.players:
+            if p.bankrupt:
+                continue
+            if p.bank > 0:
+                interest = deposit_interest(p.bank)
+                if interest > 0:
+                    p.bank += interest
+                    self.add_log("银行", f"{p.name} 存款利息 +¥{interest}")
+            if p.loan > 0:
+                interest = loan_interest(p.loan)
+                if interest > 0:
+                    p.loan += interest
+                    self.add_log("银行", f"{p.name} 贷款利息 +¥{interest}")
+
     def _collect_rent(self, player: Player, owner: Optional[str], rent: int) -> None:
         paid = player.pay(rent)
         if paid and owner is not None:
@@ -381,7 +449,7 @@ class Game:
 
     def _check_bankrupt(self) -> None:
         for pl in self.players:
-            if pl.money == 0 and pl.wallets:
+            if pl.money == 0 and pl.bank == 0 and pl.wallets:
                 pl.bankrupt = True
 
     def _detect_winner(self) -> None:

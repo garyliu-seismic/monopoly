@@ -25,10 +25,10 @@ class StockMarket:
     def __init__(self, seed: Optional[int] = None):
         self.rng = random.Random(seed)
         self.stocks: List[Stock] = [
-            Stock("TECH", "科技股", 100),
-            Stock("BANK", "银行股", 80),
-            Stock("ENERGY", "能源股", 60),
-            Stock("REAL", "地产股", 120),
+            Stock("TECH", "科技股", 500),
+            Stock("BANK", "银行股", 400),
+            Stock("ENERGY", "能源股", 300),
+            Stock("REAL", "地产股", 600),
         ]
 
     def get(self, code: str) -> Optional[Stock]:
@@ -40,7 +40,7 @@ class StockMarket:
     def tick(self) -> None:
         """Random-walk every price once per turn (floor at 5)."""
         for s in self.stocks:
-            s.price = max(5, s.price + self.rng.randint(-10, 10))
+            s.price = max(50, s.price + self.rng.randint(-50, 50))
 
     def to_dict(self) -> dict:
         return {

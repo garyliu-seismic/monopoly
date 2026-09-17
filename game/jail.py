@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Tuple
 
 
-BAIL_COST = 50
+BAIL_COST = 1000
 JAIL_MAX_TURNS = 3
 
 

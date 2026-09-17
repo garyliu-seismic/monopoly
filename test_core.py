@@ -24,9 +24,9 @@ def test_wallet_transfer_and_spend():
     assert a.money_value == 40 and b.money_value == 60
 
     p = Player("solo", holds=2)
-    assert p.money == 1800
+    assert p.money == 15000
     paid = p.spend(999999)
-    assert paid == 1800
+    assert paid == 15000
     assert p.money == 0
     assert p.is_bankrupt()
 
@@ -119,8 +119,8 @@ def test_railroads_are_purchasable_and_collect_scaled_rent():
     g._land(visitor)
 
     assert owner.properties == [5, 15]
-    assert visitor.money == 9900
-    assert owner.money == 9100
+    assert visitor.money == 9600
+    assert owner.money == 6400
 
 
 def test_utilities_collect_rent_from_roll_and_full_set():
@@ -138,8 +138,8 @@ def test_utilities_collect_rent_from_roll_and_full_set():
     g._land(visitor)
 
     assert owner.properties == [12, 28]
-    assert visitor.money == 9930
-    assert owner.money == 6570
+    assert visitor.money == 9300
+    assert owner.money == 7200
 
 
 def test_manual_purchase_mode_offers_then_buys_property():
@@ -207,7 +207,7 @@ def test_windfall_event_adds_cash():
     g.start()
     p.set_money(1000)
     events.EVENTS["windfall"](g, p)
-    assert p.money == 1800
+    assert p.money == 4000
 
 
 def test_house_fire_event_deducts_cash():
@@ -217,7 +217,7 @@ def test_house_fire_event_deducts_cash():
     g.start()
     p.set_money(1000)
     events.EVENTS["house_fire"](g, p)
-    assert p.money == 400
+    assert p.money == 0
 
 
 def test_collect_all_event_takes_from_others():
@@ -229,8 +229,8 @@ def test_collect_all_event_takes_from_others():
     a.set_money(1000)
     b.set_money(1000)
     events.EVENTS["collect_all"](g, a)
-    assert a.money == 1200
-    assert b.money == 800
+    assert a.money == 1800
+    assert b.money == 200
 
 
 def test_pay_each_event_gives_to_others():
@@ -242,8 +242,8 @@ def test_pay_each_event_gives_to_others():
     a.set_money(1000)
     b.set_money(1000)
     events.EVENTS["pay_each"](g, a)
-    assert a.money == 800
-    assert b.money == 1200
+    assert a.money == 200
+    assert b.money == 1800
 
 
 def test_full_run_with_expanded_events_does_not_crash():
@@ -344,15 +344,69 @@ def test_rent_scales_with_houses():
 
     visitor.position = 6
     g._land(visitor)
-    base = g.board.tiles[6].price // 10  # 150
-    expected = base * (1 + 2 * 1)        # 450
+    base = g.board.tiles[6].price // 20  # 75
+    expected = base * (1 + 2 * 1)        # 225
     assert visitor.money == 100000 - expected
 
 
 def test_player_initial_money_recorded_and_serialised():
     p = Player("P1", holds=2)
-    assert p.initial_money == 1800
+    assert p.initial_money == 15000
     p.set_money(500)
-    assert p.initial_money == 1800  # 初始资金不随 set_money 改变
+    assert p.initial_money == 15000  # 初始资金不随 set_money 改变
     restored = Player.from_dict(p.to_dict())
-    assert restored.initial_money == 1800
+    assert restored.initial_money == 15000
+
+
+def test_bank_deposit_and_withdraw():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(5000)
+    ok, _ = g.deposit(p, 2000)
+    assert ok and p.bank == 2000 and p.money == 3000
+    ok, _ = g.withdraw(p, 800)
+    assert ok and p.bank == 1200 and p.money == 3800
+
+
+def test_bank_borrow_and_repay():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(1000)
+    ok, _ = g.borrow(p, 5000)
+    assert ok and p.loan == 5000 and p.money == 6000
+    ok, _ = g.repay(p, 2000)
+    assert ok and p.loan == 3000 and p.money == 4000
+
+
+def test_bank_interest_accrues_each_turn():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(20000)
+    g.deposit(p, 10000)
+    g.borrow(p, 5000)
+    g.next_turn()  # 触发利息结算
+    assert p.bank == 10100  # 10000 * 1%
+    assert p.loan == 5100   # 5000 * 2%
+
+
+def test_bank_loan_limit():
+    from game.bank import LOAN_LIMIT
+    g = make_game(n=1)
+    p = g.players[0]
+    ok, _ = g.borrow(p, LOAN_LIMIT + 1)
+    assert not ok
+    ok, _ = g.borrow(p, LOAN_LIMIT)
+    assert ok
+    ok, _ = g.borrow(p, 1)
+    assert not ok
+
+
+def test_bank_serialised_in_save():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(20000)
+    g.deposit(p, 5000)
+    g.borrow(p, 2000)
+    g2 = game_engine.Game.from_dict(g.to_dict())
+    assert g2.players[0].bank == 5000
+    assert g2.players[0].loan == 2000

@@ -13,7 +13,7 @@ from typing import Dict, List
 from .money import Wallet
 
 
-def _new_wallets(held: int, start: int = 1_800) -> List[Wallet]:
+def _new_wallets(held: int, start: int = 15_000) -> List[Wallet]:
     """Split ``start`` cash fairly across ``held`` wallets."""
     held = max(1, held)
     base, rem = divmod(start, held)
@@ -35,6 +35,8 @@ class Player:
     jail_turn: int = 0
     position: int = 0
     initial_money: int = 0
+    bank: int = 0
+    loan: int = 0
     wallets: List[Wallet] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -160,6 +162,8 @@ class Player:
             "jail_turn": self.jail_turn,
             "position": self.position,
             "initial_money": self.initial_money,
+            "bank": self.bank,
+            "loan": self.loan,
             "wallets": [w.to_dict() for w in self.wallets],
         }
 
@@ -181,6 +185,8 @@ class Player:
         )
         p.stocks = {str(k): int(v) for k, v in data.get("stocks", {}).items()}
         p.wallets = [Wallet.from_dict(w) for w in data.get("wallets", [])]
+        p.bank = int(data.get("bank", 0))
+        p.loan = int(data.get("loan", 0))
         if p.initial_money <= 0:
             p.initial_money = sum(w.money_value for w in p.wallets)
         return p

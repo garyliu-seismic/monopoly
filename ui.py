@@ -424,6 +424,78 @@ class StockPanel(QWidget):
         self.on_trade(ok, msg)
 
 
+class BankPanel(QWidget):
+    """Banking: view balance, deposit / withdraw / borrow / repay."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.game = None
+        self.human_index = 0
+        self.on_bank = None  # callable(ok: bool, message: str)
+        self.setStyleSheet(
+            "BankPanel { background: #ffffff; border: 1px solid #d5e0d6; border-radius: 6px; }"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        title = QLabel("🏦 银行（存款 1%/回合 · 贷款 2%/回合）")
+        title.setStyleSheet("font-weight: bold; font-size: 12px; color: #176d5b;")
+        layout.addWidget(title)
+        self.balance_label = QLabel("存款 ¥0 · 贷款 ¥0 · 现金 ¥0")
+        self.balance_label.setStyleSheet("color: #444; font-size: 11px;")
+        layout.addWidget(self.balance_label)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("金额"))
+        self.amount_spin = QSpinBox()
+        self.amount_spin.setRange(100, 100000)
+        self.amount_spin.setSingleStep(500)
+        self.amount_spin.setValue(1000)
+        row.addWidget(self.amount_spin, 1)
+        layout.addLayout(row)
+        grid = QGridLayout()
+        deposit_btn = QPushButton("存款")
+        withdraw_btn = QPushButton("取款")
+        borrow_btn = QPushButton("贷款")
+        repay_btn = QPushButton("还款")
+        deposit_btn.clicked.connect(lambda: self._act("deposit"))
+        withdraw_btn.clicked.connect(lambda: self._act("withdraw"))
+        borrow_btn.clicked.connect(lambda: self._act("borrow"))
+        repay_btn.clicked.connect(lambda: self._act("repay"))
+        grid.addWidget(deposit_btn, 0, 0)
+        grid.addWidget(withdraw_btn, 0, 1)
+        grid.addWidget(borrow_btn, 1, 0)
+        grid.addWidget(repay_btn, 1, 1)
+        layout.addLayout(grid)
+
+    def set_game(self, game, human_index):
+        self.game = game
+        self.human_index = human_index
+        self.refresh()
+
+    def refresh(self):
+        if self.game is None:
+            self.balance_label.setText("存款 ¥0 · 贷款 ¥0 · 现金 ¥0")
+            return
+        p = self.game.players[self.human_index]
+        self.balance_label.setText(
+            f"存款 ¥{p.bank} · 贷款 ¥{p.loan} · 现金 ¥{p.money}"
+        )
+
+    def _act(self, op):
+        if self.game is None or self.on_bank is None:
+            return
+        p = self.game.players[self.human_index]
+        amount = self.amount_spin.value()
+        if op == "deposit":
+            ok, msg = self.game.deposit(p, amount)
+        elif op == "withdraw":
+            ok, msg = self.game.withdraw(p, amount)
+        elif op == "borrow":
+            ok, msg = self.game.borrow(p, amount)
+        else:
+            ok, msg = self.game.repay(p, amount)
+        self.on_bank(ok, msg)
+
+
 class MainWindow(QMainWindow):
     """Top-level window hosting board + controls + log."""
 
@@ -484,6 +556,7 @@ class MainWindow(QMainWindow):
         self._played_log_count = 0
         self._sync_players()
         self.stock_panel.set_game(self.game, self.human_index)
+        self.bank_panel.set_game(self.game, self.human_index)
         self.board_view.set_game(self.game)
         self.log_pane.game = self.game
         self.log_pane.refresh()
@@ -497,6 +570,13 @@ class MainWindow(QMainWindow):
         for panel in self._player_panels:
             panel.refresh()
         self.stock_panel.refresh()
+
+    def _after_bank(self, ok: bool, message: str) -> None:
+        self.status.setText(message)
+        self.log_pane.refresh()
+        for panel in self._player_panels:
+            panel.refresh()
+        self.bank_panel.refresh()
 
     def _build_body(self):
         central = QWidget(); self.setCentralWidget(central)
@@ -535,6 +615,9 @@ class MainWindow(QMainWindow):
         cb.addWidget(self.status)
         self.dice_view = DiceView()
         cb.addWidget(self.dice_view)
+        self.bank_panel = BankPanel()
+        self.bank_panel.on_bank = self._after_bank
+        cb.addWidget(self.bank_panel)
         b1 = QPushButton("开始新游戏"); b1.clicked.connect(self.new_game); cb.addWidget(b1)
         b2 = QPushButton("掷骰并行动"); b2.clicked.connect(self.step); cb.addWidget(b2)
         self.buy_button = QPushButton("购买当前地产")
@@ -569,6 +652,7 @@ class MainWindow(QMainWindow):
         self.dice_view.set_values(self.game._last_roll)
         self._sync_players()
         self.stock_panel.set_game(self.game, self.human_index)
+        self.bank_panel.set_game(self.game, self.human_index)
         self.board_view.set_game(self.game)
         self.log_pane.game = self.game
         self.log_pane.refresh()
@@ -681,6 +765,7 @@ class MainWindow(QMainWindow):
         for panel in self._player_panels:
             panel.refresh()
         self.stock_panel.refresh()
+        self.bank_panel.refresh()
         self._play_sounds_for_new_logs()
         if self.game and self._human_bankrupt():
             self.status.setText("你破产了！游戏结束")
@@ -700,6 +785,7 @@ class MainWindow(QMainWindow):
         "rent": "rent",
         "税收": "event",
         "股票": "buy",
+        "银行": "event",
         "坐牢": "jail",
         "牢房": "jail",
         "出狱": "event",

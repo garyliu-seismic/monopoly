@@ -14,13 +14,13 @@ from typing import Dict, List, Tuple
 
 # --- The named events + their short description strings --------------------
 def _bank_lotto(e, p) -> List[Tuple[str, str]]:
-    amt = 500
+    amt = 2500
     p.add(amt)
     return [("银行", f"{p.name} 收到红包 +{amt}")]
 
 
 def _tax_pay(e, p) -> List[Tuple[str, str]]:
-    amt = 300
+    amt = 1000
     paid = p.spend(amt)
     return [("税收", f"{p.name} 缴纳税收 -{paid}")]
 
@@ -33,25 +33,25 @@ def _jail_go(e, p) -> List[Tuple[str, str]]:
 
 
 def _money_get(e, p) -> List[Tuple[str, str]]:
-    amt = 400
+    amt = 2000
     p.add(amt)
     return [("机会", f"{p.name} 机会卡: 获得 +{amt}")]
 
 
 def _windfall(e, p) -> List[Tuple[str, str]]:
-    amt = 800
+    amt = 3000
     p.add(amt)
     return [("机会", f"{p.name} 意外之财，获得 +{amt}")]
 
 
 def _house_fire(e, p) -> List[Tuple[str, str]]:
-    amt = 600
+    amt = 1500
     paid = p.spend(amt)
     return [("社区", f"{p.name} 房子失火，维修费 -{paid}")]
 
 
 def _collect_all(e, p) -> List[Tuple[str, str]]:
-    amt = 200
+    amt = 800
     entries: List[Tuple[str, str]] = []
     total = 0
     for other in e.players:
@@ -66,7 +66,7 @@ def _collect_all(e, p) -> List[Tuple[str, str]]:
 
 
 def _pay_each(e, p) -> List[Tuple[str, str]]:
-    amt = 200
+    amt = 800
     entries: List[Tuple[str, str]] = []
     total = 0
     for other in e.players:

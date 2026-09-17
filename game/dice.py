@@ -18,10 +18,11 @@ class Dice:
         return sum(self.values)
 
 
-def roll(n: int = 2) -> Dice:
-    """Standard d6 distribution for ``n`` dice."""
-    return Dice(tuple(random.randint(1, 6) for _ in range(n)))
+def roll(n: int = 2, rng=None) -> Dice:
+    """Standard d6 distribution for ``n`` dice (uses ``rng`` when given)."""
+    rng = rng or random
+    return Dice(tuple(rng.randint(1, 6) for _ in range(n)))
 
 
-def roll_pair() -> Dice:
-    return roll(2)
+def roll_pair(rng=None) -> Dice:
+    return roll(2, rng)

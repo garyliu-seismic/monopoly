@@ -72,8 +72,8 @@ _DEFINITIONS = [
     ("基隆", TileType.PROPERTY, "brown", 1500),        # 1
     ("社区", TileType.COMMUNITY, "", 0),               # 2
     ("苗栗", TileType.PROPERTY, "brown", 2000),        # 3
-    ("所得税", TileType.TAX, "", 200),                 # 4
-    ("台北车站", TileType.RAILROAD, "railroad", 500),  # 5
+    ("所得税", TileType.TAX, "", 800),                  # 4
+    ("台北车站", TileType.RAILROAD, "railroad", 2000),  # 5
     ("彰化", TileType.PROPERTY, "lightblue", 1500),    # 6
     ("机会", TileType.CHANCE, "", 0),                  # 7
     ("云林", TileType.PROPERTY, "lightblue", 2000),    # 8
@@ -83,7 +83,7 @@ _DEFINITIONS = [
     ("电力公司", TileType.UTILITY, "utility", 1500),   # 12
     ("台东", TileType.PROPERTY, "pink", 3500),         # 13
     ("宜兰", TileType.PROPERTY, "pink", 4000),         # 14
-    ("台中车站", TileType.RAILROAD, "railroad", 500),  # 15
+    ("台中车站", TileType.RAILROAD, "railroad", 2000),  # 15
     ("花莲", TileType.PROPERTY, "orange", 5000),       # 16
     ("社区", TileType.COMMUNITY, "", 0),               # 17
     ("南投", TileType.PROPERTY, "orange", 5500),       # 18
@@ -93,7 +93,7 @@ _DEFINITIONS = [
     ("机会", TileType.CHANCE, "", 0),                  # 22
     ("新竹", TileType.PROPERTY, "red", 7500),          # 23
     ("桃园", TileType.PROPERTY, "red", 8000),          # 24
-    ("高雄车站", TileType.RAILROAD, "railroad", 500),  # 25
+    ("高雄车站", TileType.RAILROAD, "railroad", 2000),  # 25
     ("高雄", TileType.PROPERTY, "yellow", 9000),       # 26
     ("台北", TileType.PROPERTY, "yellow", 9500),       # 27
     ("自来水公司", TileType.UTILITY, "utility", 2000),  # 28
@@ -103,10 +103,10 @@ _DEFINITIONS = [
     ("中和", TileType.PROPERTY, "green", 11500),       # 32
     ("社区", TileType.COMMUNITY, "", 0),               # 33
     ("三重", TileType.PROPERTY, "green", 12000),       # 34
-    ("花莲车站", TileType.RAILROAD, "railroad", 500),  # 35
+    ("花莲车站", TileType.RAILROAD, "railroad", 2000),  # 35
     ("机会", TileType.CHANCE, "", 0),                  # 36
     ("信义", TileType.PROPERTY, "darkblue", 15000),    # 37
-    ("奢侈税", TileType.TAX, "", 500),                 # 38
+    ("奢侈税", TileType.TAX, "", 1200),                 # 38
     ("大安", TileType.PROPERTY, "darkblue", 20000),    # 39
 ]
 
