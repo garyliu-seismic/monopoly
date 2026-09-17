@@ -1,16 +1,16 @@
 """Money storage.
 
 The player model uses *multiple* ``Wallet`` slots (sidecar wallets, as
-requested). A player has up to ``holds`` parallel wallets. Payment always
-draws from the *first* (lowest wallet_id) wallet that has cash; a wallet is
-only moved *whole* up the chain. The default ``max_money_value`` is the
-world cap so overflow never happens in a normal game.
+requested). A player has up to ``holds`` parallel wallets; payment always
+draws from the *first* (lowest ``wallet_id``) wallet that has cash. When a
+wallet empties, cash cascades up the chain — a wallet is only vacated *whole*,
+never partially (富翁 "整格钱包制").
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-MAX_MONEY = 2_000_000_000  # world ceiling per wallet
+MAX_MONEY = 2_000_000_000  # world ceiling per wallet; overflow never happens normally
 
 
 @dataclass
@@ -23,6 +23,7 @@ class Wallet:
         return self.money_value > 0
 
     def set_money(self, value: int) -> None:
+        """Set this wallet to ``value`` (used by tests / AI budget code)."""
         if value < 0:
             raise ValueError("money cannot be negative in a single wallet")
         self.money_value = value
@@ -34,13 +35,13 @@ class Wallet:
         self.money_value += min(n, free)
 
     def spend(self, amount: int) -> int:
-        """Return the amount actually paid from this wallet (no negative)."""
+        """Pay from this wallet; returns the amount actually paid (never > held)."""
         paid = min(amount, self.money_value)
         self.money_value -= paid
         return paid
 
     def transfer(self, amount: int, target: "Wallet") -> int:
-        """Move up to ``amount`` into ``target`` (whole-wallet friendly)."""
+        """Move *up to* ``amount`` from this wallet into ``target`` (whole-wallet friendly)."""
         if amount <= 0 or self.wallet_id == target.wallet_id:
             return 0
         move = min(amount, self.money_value)
@@ -49,6 +50,10 @@ class Wallet:
             self.money_value -= move
             target.money_value += move
         return move
+
+    def can_pay(self, amount: int) -> bool:
+        """True when this wallet holds at least ``amount`` cash."""
+        return self.money_value >= amount
 
     def is_empty(self) -> bool:
         return self.money_value == 0

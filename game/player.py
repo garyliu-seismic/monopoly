@@ -49,6 +49,10 @@ class Player:
     def cash_balance(self) -> int:
         return self.money  # single alias in the MVP
 
+    def can_pay(self, amount: int) -> bool:
+        """True when this player's cash covers ``amount``."""
+        return self.money >= amount
+
     def set_money(self, amount: int) -> None:
         """Set total cash (spread across wallets); used by tests/AI."""
         if amount <= 0:

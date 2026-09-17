@@ -47,6 +47,18 @@ def test_board_has_34_tiles_and_grid():
         assert t.name
 
 
+def test_board_grid_is_a_continuous_monopoly_perimeter():
+    b = board_mod.Board(34)
+    positions = list(b.grid.values())
+
+    assert len(set(positions)) == 34
+    assert b.grid[0] == (0, 0)
+    assert b.grid[9] == (0, 9)
+    assert b.grid[17] == (8, 9)
+    assert b.grid[26] == (8, 0)
+    assert all(row in (0, 8) or col in (0, 9) for row, col in positions)
+
+
 def test_full_run_completes_without_crash_and_conserves_money():
     g = make_game(seed=0, n=3)
     initial_total = sum(p.money for p in g.players)
@@ -91,3 +103,54 @@ def test_buy_property_when_wealthy():
     p.set_money(100000)
     g2._land(p)
     assert p.properties == [prop_index]
+
+
+def test_railroads_are_purchasable_and_collect_scaled_rent():
+    g = make_game(n=2)
+    owner, visitor = g.players
+    owner.set_money(10000)
+    visitor.set_money(10000)
+
+    for tile_index in (5, 17):
+        owner.position = tile_index
+        g._land(owner)
+
+    visitor.position = 5
+    g._land(visitor)
+
+    assert owner.properties == [5, 17]
+    assert visitor.money == 9900
+    assert owner.money == 9100
+
+
+def test_utilities_collect_rent_from_roll_and_full_set():
+    g = make_game(n=2)
+    owner, visitor = g.players
+    owner.set_money(10000)
+    visitor.set_money(10000)
+
+    for tile_index in (12, 25):
+        owner.position = tile_index
+        g._land(owner)
+
+    g._last_roll = (3, 4)
+    visitor.position = 12
+    g._land(visitor)
+
+    assert owner.properties == [12, 25]
+    assert visitor.money == 9930
+    assert owner.money == 6570
+
+
+def test_manual_purchase_mode_offers_then_buys_property():
+    player = Player("玩家1", holds=2)
+    g = game_engine.Game([player], seed=1, auto_buy=False)
+    g.start()
+    player.position = 1
+
+    g._land(player)
+
+    assert g.pending_purchase == (player, g.board.tiles[1])
+    assert g.buy_pending_asset(player)
+    assert g.pending_purchase is None
+    assert g.board.tiles[1].owner == player.name

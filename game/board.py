@@ -104,8 +104,33 @@ class Board:
 
 
 def _grid(size: int) -> Dict[int, tuple[int, int]]:
-    """Spread tiles onto a 3x12 grid for painting."""
-    return {i: (r, c) for i, (r, c) in enumerate((divmod(i, 3) for i in range(size)))}
+    """Loop the tiles out around a rectangular perimeter (a Monopoly ring).
+
+    ``grid[tile]`` maps a tile ordinal to a ``(row, col)`` cell so the UI can
+    paint the board as a ring rather than a plain table.
+
+    The 34 tiles form the full perimeter of a 10 by 9 board: 10 across the
+    bottom, 8 up the right edge, 9 across the top, then 7 down the left edge.
+    This produces a balanced, traditional Monopoly-style board with a large
+    central play area.
+    """
+    if size < 0:
+        return {}
+    coords: list[tuple[int, int]] = []
+    # bottom row: left to right
+    for c in range(10):
+        coords.append((0, c))
+    # right column: up from bottom-right
+    for r in range(1, 9):
+        coords.append((r, 9))
+    # top row: right to left, excluding the top-right corner
+    for c in range(8, -1, -1):
+        coords.append((8, c))
+    # left column: down from top-left, excluding both corners
+    for r in range(7, 0, -1):
+        coords.append((r, 0))
+    assert len(coords) >= size, coords
+    return {i: coords[i] for i in range(size)}
 
 
 def build_board(size: int = 34, rng: random.Random | None = None) -> Board:
