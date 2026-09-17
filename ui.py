@@ -19,12 +19,14 @@ from PySide6.QtWidgets import (
     QGridLayout, QTextBrowser, QPushButton, QLabel, QFrame,
 )
 from PySide6.QtCore import Qt, QPoint, QSize, QRect, QTimer
-from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPolygon
+from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen
 
 from game import game as game_engine
 from game.player import Player
 from game.board import Board
 from game.tile_types import TileType
+
+import sound
 
 
 # ------------------------------------------------------------------- styles
@@ -39,6 +41,8 @@ _GROUP_COLORS = {
     "brown": "#6d4c41", "lightblue": "#4fc3f7", "pink": "#ec407a",
     "orange": "#ffb300", "yellow": "#fdd835",
 }
+PLAYER_COLORS = ["#e53935", "#1e88e5", "#43a047", "#8e24aa"]
+PLAYER_AVATARS = ["🧑", "🤖", "👽", "👻"]
 
 
 class BoardView(QWidget):
@@ -95,6 +99,7 @@ class BoardView(QWidget):
     def _advance_animation(self) -> None:
         player_index, path, step = self._active_animation
         self._display_positions[player_index] = path[step]
+        sound.play("move")
         self.update()
         if step + 1 == len(path):
             self._display_positions.pop(player_index, None)
@@ -134,6 +139,19 @@ class BoardView(QWidget):
             qp.drawRect(rect)
             if tile.group:
                 qp.fillRect(rect.adjusted(3, 3, -3, -int(cell * 0.76)), QColor(_GROUP_COLORS.get(tile.group, "#888888")))
+            if tile.house:
+                band = rect.adjusted(3, 3, -3, -int(cell * 0.76))
+                n = min(tile.house, 4)
+                bw = band.width() / 5
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor("#ffffff"))
+                for k in range(n):
+                    qp.drawRect(
+                        band.left() + int(bw * (k + 1)) - int(bw * 0.35),
+                        band.top() + int(band.height() * 0.22),
+                        int(bw * 0.7),
+                        int(band.height() * 0.56),
+                    )
             if tile.tile == active_position:
                 qp.setPen(QColor("#147d68"))
                 qp.drawRect(rect.adjusted(2, 2, -2, -2))
@@ -165,27 +183,79 @@ class BoardView(QWidget):
 
         if board_game is not None:
             board_tiles = board_game.board.tiles
-            pcolor = ["#e53935", "#1e88e5", "#43a047", "#8e24aa"]
             for idx, pl in enumerate(board_game.players):
+                if pl.bankrupt:
+                    continue
                 display_position = self._display_positions.get(idx, pl.position)
                 tile = board_tiles[display_position]
                 r, c = grid.get(tile.tile, (0, 0))
                 if not isinstance(r, int) or not isinstance(c, int):
                     r, c = 0, tile.tile % 3
                 xc, yc = pos(c, r)
-                flag_size = max(10, int(cell * 0.17))
-                flag_x = int(xc + cell * (0.3 + (idx % 2) * 0.28))
-                flag_y = int(yc + cell * (0.6 + (idx // 2) * 0.16))
-                flag_color = QColor(pcolor[idx % len(pcolor)])
-                qp.setPen(flag_color)
-                qp.drawLine(flag_x, flag_y - flag_size, flag_x, flag_y + flag_size)
-                qp.setBrush(flag_color)
-                qp.drawPolygon(QPolygon([
-                    QPoint(flag_x, flag_y - flag_size),
-                    QPoint(flag_x + flag_size, flag_y - flag_size + flag_size // 3),
-                    QPoint(flag_x, flag_y - flag_size + flag_size * 2 // 3),
-                ]))
+                token_r = max(9, int(cell * 0.14))
+                cx = int(xc + cell * (0.28 + (idx % 2) * 0.30))
+                cy = int(yc + cell * (0.60 + (idx // 2) * 0.18))
+                color = QColor(PLAYER_COLORS[idx % len(PLAYER_COLORS)])
+                qp.setBrush(color)
+                qp.setPen(QPen(QColor("#ffffff"), 2))
+                qp.drawEllipse(cx - token_r, cy - token_r, token_r * 2, token_r * 2)
+                emoji = PLAYER_AVATARS[idx % len(PLAYER_AVATARS)]
+                qp.setFont(QFont("Segoe UI Emoji", token_r))
+                qp.drawText(
+                    QRect(cx - token_r, cy - token_r, token_r * 2, token_r * 2),
+                    Qt.AlignCenter,
+                    emoji,
+                )
         qp.end()
+
+
+class DiceView(QWidget):
+    """Shows the two dice with pips, refreshed after each roll."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.values = (1, 6)
+        self.setFixedHeight(60)
+
+    def set_values(self, values) -> None:
+        self.values = tuple(values)
+        self.update()
+
+    def paintEvent(self, _event):
+        qp = QPainter(self)
+        qp.setRenderHint(QPainter.Antialiasing)
+        total_w = self.width()
+        die = max(24, min(total_w // 2 - 10, 48))
+        gap = 12
+        start_x = (total_w - (die * 2 + gap)) // 2
+        y = (self.height() - die) // 2
+        for i, v in enumerate(self.values):
+            rect = QRect(start_x + i * (die + gap), y, die, die)
+            qp.setBrush(QColor("#ffffff"))
+            qp.setPen(QPen(QColor("#176d5b"), 2))
+            qp.drawRoundedRect(rect, 8, 8)
+            self._draw_pips(qp, rect, v)
+        qp.end()
+
+    @staticmethod
+    def _pip_layout(v):
+        return {
+            1: [(0.5, 0.5)],
+            2: [(0.28, 0.28), (0.72, 0.72)],
+            3: [(0.28, 0.28), (0.5, 0.5), (0.72, 0.72)],
+            4: [(0.28, 0.28), (0.72, 0.28), (0.28, 0.72), (0.72, 0.72)],
+            5: [(0.28, 0.28), (0.72, 0.28), (0.5, 0.5), (0.28, 0.72), (0.72, 0.72)],
+            6: [(0.28, 0.28), (0.72, 0.28), (0.28, 0.5), (0.72, 0.5), (0.28, 0.72), (0.72, 0.72)],
+        }[v]
+
+    def _draw_pips(self, qp, rect, v):
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(QColor("#176d5b"))
+        r = max(2, rect.width() * 0.09)
+        for fx, fy in self._pip_layout(v):
+            cx = rect.left() + rect.width() * fx
+            cy = rect.top() + rect.height() * fy
+            qp.drawEllipse(QPoint(cx, cy), r, r)
 
 
 class LogPane(QTextBrowser):
@@ -215,20 +285,20 @@ def _phase_color(phase: str) -> str:
 class PlayerPanel(QWidget):
     """One player's card on the left: 姓名/现金/地产数量/地产明细."""
 
-    def __init__(self, player: Player, board: Board, is_human: bool, parent=None):
+    def __init__(self, player: Player, board: Board, is_human: bool, parent=None,
+                 avatar: str = "🧑", color: str = "#555"):
         super().__init__(parent)
         self.player = player
         self.board = board
         self.is_human = is_human
+        self.avatar = avatar
         self.setMinimumHeight(104)
         self.setStyleSheet("PlayerPanel { background: #ffffff; border: 1px solid #d5e0d6; border-radius: 6px; }")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         title = QLabel(
-            f"{player.name}" + ("  (你)" if is_human else "  (AI)")
+            f"{avatar}  {player.name}" + ("  (你)" if is_human else "  (AI)")
         )
-        title.setStyleSheet("QLabel { font-weight: bold; font-size: 13px; }")
-        color = "#0a7" if is_human else "#555"
         title.setStyleSheet(f"QLabel {{ font-weight: bold; font-size: 13px; color: {color}; }}")
         layout.addWidget(title)
         self.info = QLabel("现金 ¥0 · 地产 0 块")
@@ -259,6 +329,7 @@ class MainWindow(QMainWindow):
         self.game: Optional[game_engine.Game] = None
         self.human_index: int = 0
         self._player_panels: List[PlayerPanel] = []
+        self._played_log_count = 0
         self._build_menu()
         self._build_body()
 
@@ -267,8 +338,16 @@ class MainWindow(QMainWindow):
         menu = menubar.addMenu("游戏")
         a = QAction("新局", self); a.triggered.connect(self.new_game)
         menu.addAction(a)
+        self.sound_action = QAction("音效", self)
+        self.sound_action.setCheckable(True)
+        self.sound_action.setChecked(True)
+        self.sound_action.toggled.connect(self._toggle_sound)
+        menu.addAction(self.sound_action)
         quit_action = QAction("退出", self); quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
+
+    def _toggle_sound(self, enabled: bool) -> None:
+        sound.set_enabled(enabled)
 
     def _build_body(self):
         central = QWidget(); self.setCentralWidget(central)
@@ -302,6 +381,8 @@ class MainWindow(QMainWindow):
         self.status.setWordWrap(True)
         self.status.setStyleSheet("background: #e1eee5; padding: 8px; border-radius: 4px;")
         cb.addWidget(self.status)
+        self.dice_view = DiceView()
+        cb.addWidget(self.dice_view)
         b1 = QPushButton("开始新游戏"); b1.clicked.connect(self.new_game); cb.addWidget(b1)
         b2 = QPushButton("掷骰并行动"); b2.clicked.connect(self.step); cb.addWidget(b2)
         self.buy_button = QPushButton("购买当前地产")
@@ -332,6 +413,8 @@ class MainWindow(QMainWindow):
         self.human_index = 0
         self.game = game_engine.Game(players, seed=1, auto_buy=False)
         self.game.start()
+        self._played_log_count = 0
+        self.dice_view.set_values(self.game._last_roll)
         self._sync_players()
         self.board_view.set_game(self.game)
         self.log_pane.game = self.game
@@ -344,7 +427,12 @@ class MainWindow(QMainWindow):
             p.setParent(None)
         self._player_panels = []
         for i, player in enumerate(self.game.players):
-            panel = PlayerPanel(player, self.game.board, i == self.human_index, self.players_grid.parentWidget())
+            panel = PlayerPanel(
+                player, self.game.board, i == self.human_index,
+                self.players_grid.parentWidget(),
+                avatar=PLAYER_AVATARS[i % len(PLAYER_AVATARS)],
+                color=PLAYER_COLORS[i % len(PLAYER_COLORS)],
+            )
             self.players_grid.addWidget(panel, i, 0, 1, -1)
             self._player_panels.append(panel)
 
@@ -418,12 +506,16 @@ class MainWindow(QMainWindow):
             if self._is_human_turn():
                 break
             self._act_current()
+            self._play_sounds_for_new_logs()
         self._after_step()
 
     def _after_step(self):
         self.log_pane.refresh()
+        if self.game is not None:
+            self.dice_view.set_values(self.game._last_roll)
         for panel in self._player_panels:
             panel.refresh()
+        self._play_sounds_for_new_logs()
         if self.game and self.game.is_won():
             self.status.setText("游戏结束 · " + (self.game.winner.name or "") + " 获胜!")
         elif self.game and self.game.pending_purchase is not None:
@@ -432,6 +524,32 @@ class MainWindow(QMainWindow):
         else:
             self.status.setText("轮到你行动")
         self._refresh_purchase_controls()
+
+    _PHASE_SOUNDS = {
+        "roll": "roll",
+        "buy": "buy",
+        "build": "buy",
+        "rent": "rent",
+        "税收": "event",
+        "坐牢": "jail",
+        "牢房": "jail",
+        "出狱": "event",
+        "机会": "event",
+        "社区": "event",
+        "银行": "event",
+        "起点奖金": "event",
+        "结束": "win",
+    }
+
+    def _play_sounds_for_new_logs(self) -> None:
+        if self.game is None:
+            return
+        new_logs = self.game.log[self._played_log_count:]
+        self._played_log_count = len(self.game.log)
+        for phase, _text in new_logs:
+            name = self._PHASE_SOUNDS.get(phase)
+            if name:
+                sound.play(name)
 
     def _refresh_purchase_controls(self) -> None:
         pending_for_human = (
@@ -445,6 +563,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    sound.init(enabled=True)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

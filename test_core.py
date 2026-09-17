@@ -198,3 +198,55 @@ def test_bot_declines_an_affordable_property_when_cash_reserve_is_too_low():
 
     assert g.board.tiles[3].owner is None
     assert g.pending_purchase is None
+
+
+def test_windfall_event_adds_cash():
+    from game import events
+    p = Player("P1", holds=2)
+    g = game_engine.Game([p], seed=1)
+    g.start()
+    p.set_money(1000)
+    events.EVENTS["windfall"](g, p)
+    assert p.money == 1800
+
+
+def test_house_fire_event_deducts_cash():
+    from game import events
+    p = Player("P1", holds=2)
+    g = game_engine.Game([p], seed=1)
+    g.start()
+    p.set_money(1000)
+    events.EVENTS["house_fire"](g, p)
+    assert p.money == 400
+
+
+def test_collect_all_event_takes_from_others():
+    from game import events
+    a = Player("A", holds=2)
+    b = Player("B", holds=2)
+    g = game_engine.Game([a, b], seed=1)
+    g.start()
+    a.set_money(1000)
+    b.set_money(1000)
+    events.EVENTS["collect_all"](g, a)
+    assert a.money == 1200
+    assert b.money == 800
+
+
+def test_pay_each_event_gives_to_others():
+    from game import events
+    a = Player("A", holds=2)
+    b = Player("B", holds=2)
+    g = game_engine.Game([a, b], seed=1)
+    g.start()
+    a.set_money(1000)
+    b.set_money(1000)
+    events.EVENTS["pay_each"](g, a)
+    assert a.money == 800
+    assert b.money == 1200
+
+
+def test_full_run_with_expanded_events_does_not_crash():
+    g = make_game(seed=7, n=4)
+    g.run(steps=200)
+    assert len(g.log) > 0

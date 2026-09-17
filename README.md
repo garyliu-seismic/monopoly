@@ -21,9 +21,21 @@ monopoly/
 │   ├── jail.py      #   监狱 / 进房规则 (入狱、掷骰出狱、赎金)
 │   └── game.py      #   回合主循环、胜负判定、收租 / 缴税 / 破产
 ├── ui.py            #   PySide6 表现层 (主窗口)
+├── sound.py         #   程序化音效合成 (无外部音频资源)
 ├── run.py           #   程序入口 (GUI，无显示则降级为纯文本模拟)
 └── test_core.py     #   逻辑层单测 (pytest)
 ```
+
+## 表现层增强
+
+- **人物头像**：每位玩家有专属 emoji 头像 + 配色，显示在棋盘棋子与左侧玩家卡片上。
+- **音效**：掷骰、移动、购买、收租、入狱、事件、胜利均有音效（`sound.py` 本地合成 WAV，无需外部资源；菜单“游戏 → 音效”可开关）。
+- **骰子显示**：右侧控制区实时显示两颗骰子的点数。
+- **动画**：玩家棋子逐格行走动画（含步进音效）；地产格上的白色方块表示房屋数量。
+
+## 随机事件
+
+机会 / 社区卡共 8 种：`money_get`（+400）、`windfall`（+800）、`collect_all`（向每人收 200）、`jail_go`（入狱）、`tax_pay`（-300）、`bank_lotto`（+500）、`house_fire`（-600）、`pay_each`（给每人 200）。
 
 ## 核心玩法
 
@@ -68,6 +80,8 @@ pytest test_core.py -v
 - `test_full_run_completes_without_crash_and_conserves_money` — 整局运行
 - `test_bankrupt_player_drops_out` — 破产玩家出局、判定赢家
 - `test_buy_property_when_wealthy` — 富豪玩家购买地产
+- `test_windfall_event_adds_cash` / `test_house_fire_event_deducts_cash` — 新增事件
+- `test_collect_all_event_takes_from_others` / `test_pay_each_event_gives_to_others` — 多人交互事件
 
 ---
 本项目采用纯逻辑层与表现层分离设计，便于测试与二次开发。

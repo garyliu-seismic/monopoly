@@ -76,10 +76,12 @@ class Game:
         return text
 
     def _build_stacks(self) -> dict[str, List[str]]:
-        names = ["money_get", "bank_lotto", "jail_go", "tax_pay", "pass"]
+        # 机会卡偏向“得利/出行”，社区卡偏向“开销/互助”，更贴近大富翁风味。
+        chance = ["money_get", "windfall", "collect_all", "jail_go", "tax_pay", "pass"]
+        community = ["bank_lotto", "house_fire", "pay_each", "tax_pay", "money_get", "pass"]
         return {
-            "chance": list(names),
-            "community": list(reversed(names)),
+            "chance": list(chance),
+            "community": list(community),
         }
 
     def _pop_stack(self, key: str) -> str:
