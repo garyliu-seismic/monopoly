@@ -57,3 +57,19 @@ class Wallet:
 
     def is_empty(self) -> bool:
         return self.money_value == 0
+
+    # ------------------------------------------------------------ serialise
+    def to_dict(self) -> dict:
+        return {
+            "wallet_id": self.wallet_id,
+            "money_value": self.money_value,
+            "max_money_value": self.max_money_value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Wallet":
+        return cls(
+            data["wallet_id"],
+            data.get("money_value", 0),
+            data.get("max_money_value", MAX_MONEY),
+        )

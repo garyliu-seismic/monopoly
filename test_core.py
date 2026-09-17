@@ -250,3 +250,68 @@ def test_full_run_with_expanded_events_does_not_crash():
     g = make_game(seed=7, n=4)
     g.run(steps=200)
     assert len(g.log) > 0
+
+
+def test_stock_buy_and_sell():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(10000)
+    price = g.stock_market.get("TECH").price
+    ok, _ = g.buy_stock(p, "TECH", 10)
+    assert ok
+    assert p.stocks["TECH"] == 10
+    assert p.money == 10000 - price * 10
+    ok, _ = g.sell_stock(p, "TECH", 4)
+    assert ok
+    assert p.stocks["TECH"] == 6
+
+
+def test_stock_buy_rejects_when_cash_insufficient():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(50)
+    ok, _ = g.buy_stock(p, "REAL", 1)  # 地产股 120 > 50
+    assert not ok
+    assert p.stocks.get("REAL", 0) == 0
+
+
+def test_stock_sell_rejects_when_holding_insufficient():
+    g = make_game(n=1)
+    p = g.players[0]
+    ok, _ = g.sell_stock(p, "TECH", 5)
+    assert not ok
+    assert p.stocks.get("TECH", 0) == 0
+
+
+def test_stock_prices_change_each_turn():
+    g = make_game(n=1)
+    before = [s.price for s in g.stock_market.stocks]
+    g.next_turn()
+    after = [s.price for s in g.stock_market.stocks]
+    assert after != before
+
+
+def test_save_load_roundtrip():
+    import os
+    import tempfile
+    from save import load_game, save_game
+
+    g = make_game(n=2)
+    p = g.players[0]
+    p.set_money(5000)
+    g.buy_stock(p, "TECH", 3)
+    g.run(steps=5)
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.json")
+        save_game(g, path)
+        g2 = load_game(path)
+
+    assert [pl.name for pl in g2.players] == [pl.name for pl in g.players]
+    assert g2.turn == g.turn
+    assert g2.players[0].money == g.players[0].money
+    assert g2.players[0].stocks == g.players[0].stocks
+    assert [s.price for s in g2.stock_market.stocks] == [s.price for s in g.stock_market.stocks]
+    assert [t.owner for t in g2.board.tiles] == [t.owner for t in g.board.tiles]
+    # 加载后仍可继续运行
+    g2.run(steps=3)

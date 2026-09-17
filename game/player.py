@@ -27,6 +27,7 @@ class Player:
     holds: int = 2
     properties: List[int] = field(default_factory=list)
     houses: Dict[int, int] = field(default_factory=dict)
+    stocks: Dict[str, int] = field(default_factory=dict)
     bankrupt: bool = False
     bail: bool = False
     in_prison: bool = False
@@ -139,6 +140,43 @@ class Player:
 
     def get_wallet_ids(self) -> List[int]:
         return list(range(len(self.wallets)))
+
+    # ------------------------------------------------------------ serialise
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "is_bot": self.is_bot,
+            "holds": self.holds,
+            "properties": list(self.properties),
+            "houses": {str(k): v for k, v in self.houses.items()},
+            "stocks": dict(self.stocks),
+            "bankrupt": self.bankrupt,
+            "bail": self.bail,
+            "in_prison": self.in_prison,
+            "jail_counter": self.jail_counter,
+            "jail_turn": self.jail_turn,
+            "position": self.position,
+            "wallets": [w.to_dict() for w in self.wallets],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Player":
+        p = cls(
+            name=data["name"],
+            is_bot=data.get("is_bot", False),
+            holds=data.get("holds", 2),
+            properties=list(data.get("properties", [])),
+            houses={int(k): v for k, v in data.get("houses", {}).items()},
+            bankrupt=data.get("bankrupt", False),
+            bail=data.get("bail", False),
+            in_prison=data.get("in_prison", False),
+            jail_counter=data.get("jail_counter", 0),
+            jail_turn=data.get("jail_turn", 0),
+            position=data.get("position", 0),
+        )
+        p.stocks = {str(k): int(v) for k, v in data.get("stocks", {}).items()}
+        p.wallets = [Wallet.from_dict(w) for w in data.get("wallets", [])]
+        return p
 
 
 def player_from_dict(d: dict) -> "Player":

@@ -24,6 +24,8 @@ from game.jail import BAIL_COST, JAIL_MAX_TURNS, is_double
 from game.player import Player
 from game.events import EVENTS
 from game.tile_types import TileType
+from game.stock import StockMarket
+from game.serial import rng_from_json, rng_to_json
 
 Log = List[Tuple[str, str]]
 
@@ -47,6 +49,7 @@ class Game:
         self.max_turns = max_turns
         self.auto_buy = auto_buy
         self.board_size = len(self.board.tiles)
+        self._seed = seed
         self._rng = random.Random(seed)
         self.turn_index = 0
         self.turn = 0
@@ -55,6 +58,7 @@ class Game:
         self.pending_purchase: Optional[tuple[Player, Tile]] = None
         self._last_roll: Tuple[int, int] = (0, 0)
         self._stacks: dict[str, List[str]] = self._build_stacks()
+        self.stock_market = StockMarket(seed)
 
     def start(self) -> None:
         self.board.reset_owned()
@@ -64,6 +68,7 @@ class Game:
         self.phase = "setup"
         self.winner = None
         self.pending_purchase = None
+        self.stock_market = StockMarket(self._seed)
         for p in self.players:
             p.position = 0
             p.bankrupt = False
@@ -94,6 +99,7 @@ class Game:
         if self.turn >= self.max_turns:
             raise GameOver("turn limit reached, no winner")
         self.turn += 1
+        self.stock_market.tick()
         n = len(self.players)
         for _ in range(n):
             self.turn_index = (self.turn_index + 1) % n
@@ -275,6 +281,38 @@ class Game:
         self.add_log("buy", f"{player.name} 放弃购买 {self.board.tile_by_index(player.position).name}")
         return True
 
+    # ------------------------------------------------------------- stocks
+    def buy_stock(self, player: Player, code: str, shares: int) -> tuple[bool, str]:
+        """Buy ``shares`` of ``code`` with cash. Returns (ok, message)."""
+        stock = self.stock_market.get(code)
+        if stock is None or shares <= 0:
+            return False, "无效的股票代码或数量"
+        cost = stock.price * shares
+        if not player.can_pay(cost):
+            return False, f"现金不足（需 ¥{cost}）"
+        player.pay(cost)
+        player.stocks[code] = player.stocks.get(code, 0) + shares
+        self.add_log("股票", f"{player.name} 买入 {stock.name} ×{shares}（-¥{cost}）")
+        return True, f"买入 {stock.name} ×{shares}"
+
+    def sell_stock(self, player: Player, code: str, shares: int) -> tuple[bool, str]:
+        """Sell ``shares`` of ``code`` for cash. Returns (ok, message)."""
+        stock = self.stock_market.get(code)
+        if stock is None or shares <= 0:
+            return False, "无效的股票代码或数量"
+        held = player.stocks.get(code, 0)
+        if held < shares:
+            return False, f"持股不足（持有 {held} 股）"
+        revenue = stock.price * shares
+        player.add(revenue)
+        left = held - shares
+        if left:
+            player.stocks[code] = left
+        else:
+            player.stocks.pop(code, None)
+        self.add_log("股票", f"{player.name} 卖出 {stock.name} ×{shares}（+¥{revenue}）")
+        return True, f"卖出 {stock.name} ×{shares}"
+
     def _collect_rent(self, player: Player, owner: Optional[str], rent: int) -> None:
         paid = player.pay(rent)
         if paid and owner is not None:
@@ -352,3 +390,54 @@ class Game:
 
     def is_won(self) -> bool:
         return self.winner is not None
+
+    # ------------------------------------------------------------ serialise
+    def to_dict(self) -> dict:
+        pending = None
+        if self.pending_purchase is not None:
+            pending = [self.pending_purchase[0].name, self.pending_purchase[1].tile]
+        return {
+            "players": [p.to_dict() for p in self.players],
+            "board": self.board.to_dict(),
+            "stock_market": self.stock_market.to_dict(),
+            "turn": self.turn,
+            "turn_index": self.turn_index,
+            "phase": self.phase,
+            "winner": self.winner.name if self.winner else None,
+            "pending_purchase": pending,
+            "log": [[phase, text] for phase, text in self.log],
+            "last_roll": list(self._last_roll),
+            "stacks": {k: list(v) for k, v in self._stacks.items()},
+            "max_turns": self.max_turns,
+            "auto_buy": self.auto_buy,
+            "seed": self._seed,
+            "rng_state": rng_to_json(self._rng),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Game":
+        players = [Player.from_dict(p) for p in data["players"]]
+        board = Board.from_dict(data["board"])
+        g = cls(
+            players,
+            board=board,
+            seed=data.get("seed"),
+            max_turns=data.get("max_turns", 1000),
+            auto_buy=data.get("auto_buy", True),
+        )
+        g.stock_market = StockMarket.from_dict(data["stock_market"])
+        g.turn = data.get("turn", 0)
+        g.turn_index = data.get("turn_index", 0)
+        g.phase = data.get("phase", "setup")
+        winner_name = data.get("winner")
+        g.winner = next((p for p in g.players if p.name == winner_name), None) if winner_name else None
+        pending = data.get("pending_purchase")
+        if pending:
+            pname, tidx = pending
+            player = next((p for p in g.players if p.name == pname), None)
+            g.pending_purchase = (player, g.board.tiles[tidx]) if player is not None else None
+        g.log = [(p, t) for p, t in data.get("log", [])]
+        g._last_roll = tuple(data.get("last_roll", [0, 0]))
+        g._stacks = {k: list(v) for k, v in data.get("stacks", {}).items()}
+        rng_from_json(g._rng, data["rng_state"])
+        return g

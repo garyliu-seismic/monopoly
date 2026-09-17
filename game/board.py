@@ -39,6 +39,29 @@ class Tile:
         self.owner = owner
         self.house = house
 
+    def to_dict(self) -> dict:
+        return {
+            "tile": self.tile,
+            "name": self.name,
+            "category": int(self.category),
+            "group": self.group,
+            "price": self.price,
+            "owner": self.owner,
+            "house": self.house,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Tile":
+        return cls(
+            data["tile"],
+            data["name"],
+            TileType(data["category"]),
+            data.get("group", ""),
+            data.get("price", 0),
+            data.get("owner"),
+            data.get("house", 0),
+        )
+
 
 # (name, category, group, price) in 大富翁 order; the engine dispatches the
 # remaining categories (CHANCE/COMMUNITY/TAX/... ).
@@ -101,6 +124,16 @@ class Board:
         for t in self.tiles:
             t.owner = None
             t.house = 0
+
+    # ------------------------------------------------------------ serialise
+    def to_dict(self) -> dict:
+        return {"size": self.size, "tiles": [t.to_dict() for t in self.tiles]}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Board":
+        b = cls(size=data["size"])
+        b.tiles = [Tile.from_dict(t) for t in data["tiles"]]
+        return b
 
 
 def _grid(size: int) -> Dict[int, tuple[int, int]]:

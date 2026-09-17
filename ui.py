@@ -17,6 +17,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTextBrowser, QPushButton, QLabel, QFrame,
+    QComboBox, QSpinBox, QFileDialog,
 )
 from PySide6.QtCore import Qt, QPoint, QSize, QRect, QTimer
 from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen
@@ -27,6 +28,7 @@ from game.board import Board
 from game.tile_types import TileType
 
 import sound
+import save
 
 
 # ------------------------------------------------------------------- styles
@@ -319,6 +321,91 @@ class PlayerPanel(QWidget):
         self.props.setText(" / ".join(names) if names else "（暂无）")
 
 
+class StockPanel(QWidget):
+    """Live stock quotes plus buy/sell controls for the human player."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.game = None
+        self.human_index = 0
+        self.on_trade = None  # callable(ok: bool, message: str)
+        self.setStyleSheet(
+            "StockPanel { background: #ffffff; border: 1px solid #d5e0d6; border-radius: 6px; }"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        title = QLabel("📈 股票市场")
+        title.setStyleSheet("font-weight: bold; font-size: 13px; color: #176d5b;")
+        layout.addWidget(title)
+        self.quote_label = QLabel("（未开始）")
+        self.quote_label.setWordWrap(True)
+        self.quote_label.setStyleSheet("color: #444; font-size: 11px;")
+        layout.addWidget(self.quote_label)
+        row = QHBoxLayout()
+        self.stock_combo = QComboBox()
+        self.shares_spin = QSpinBox()
+        self.shares_spin.setRange(1, 999)
+        self.shares_spin.setValue(10)
+        row.addWidget(self.stock_combo, 2)
+        row.addWidget(self.shares_spin, 1)
+        layout.addLayout(row)
+        row2 = QHBoxLayout()
+        buy_btn = QPushButton("买入")
+        sell_btn = QPushButton("卖出")
+        buy_btn.clicked.connect(lambda: self._trade(True))
+        sell_btn.clicked.connect(lambda: self._trade(False))
+        row2.addWidget(buy_btn)
+        row2.addWidget(sell_btn)
+        layout.addLayout(row2)
+        self.holding_label = QLabel("我的持仓：无")
+        self.holding_label.setWordWrap(True)
+        self.holding_label.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(self.holding_label)
+
+    def set_game(self, game, human_index):
+        self.game = game
+        self.human_index = human_index
+        self._refresh_combo()
+        self.refresh()
+
+    def _refresh_combo(self):
+        self.stock_combo.clear()
+        if self.game is None:
+            return
+        for s in self.game.stock_market.stocks:
+            self.stock_combo.addItem(f"{s.name} ({s.code})", s.code)
+
+    def refresh(self):
+        if self.game is None:
+            self.quote_label.setText("（未开始）")
+            return
+        market = self.game.stock_market
+        self.quote_label.setText(
+            "  |  ".join(f"{s.name} ¥{s.price}" for s in market.stocks)
+        )
+        human = self.game.players[self.human_index]
+        held = [(s.name, human.stocks.get(s.code, 0)) for s in market.stocks]
+        held = [(n, c) for n, c in held if c > 0]
+        if held:
+            self.holding_label.setText(
+                "我的持仓：" + "，".join(f"{n} ×{c}" for n, c in held)
+            )
+        else:
+            self.holding_label.setText("我的持仓：无")
+
+    def _trade(self, is_buy):
+        if self.game is None or self.on_trade is None:
+            return
+        code = self.stock_combo.currentData()
+        shares = self.shares_spin.value()
+        human = self.game.players[self.human_index]
+        if is_buy:
+            ok, msg = self.game.buy_stock(human, code, shares)
+        else:
+            ok, msg = self.game.sell_stock(human, code, shares)
+        self.on_trade(ok, msg)
+
+
 class MainWindow(QMainWindow):
     """Top-level window hosting board + controls + log."""
 
@@ -343,11 +430,55 @@ class MainWindow(QMainWindow):
         self.sound_action.setChecked(True)
         self.sound_action.toggled.connect(self._toggle_sound)
         menu.addAction(self.sound_action)
+        save_action = QAction("存档", self); save_action.triggered.connect(self.save_game)
+        menu.addAction(save_action)
+        load_action = QAction("读档", self); load_action.triggered.connect(self.load_game)
+        menu.addAction(load_action)
         quit_action = QAction("退出", self); quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
 
     def _toggle_sound(self, enabled: bool) -> None:
         sound.set_enabled(enabled)
+
+    def save_game(self) -> None:
+        if self.game is None:
+            self.status.setText("请先开始游戏")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "存档", "monopoly_save.json", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            save.save_game(self.game, path)
+            self.status.setText(f"已存档：{path}")
+        except Exception as exc:  # pragma: no cover
+            self.status.setText(f"存档失败：{exc}")
+
+    def load_game(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "读档", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            loaded = save.load_game(path)
+        except Exception as exc:  # pragma: no cover
+            self.status.setText(f"读档失败：{exc}")
+            return
+        self.game = loaded
+        self._played_log_count = 0
+        self._sync_players()
+        self.stock_panel.set_game(self.game, self.human_index)
+        self.board_view.set_game(self.game)
+        self.log_pane.game = self.game
+        self.log_pane.refresh()
+        self.dice_view.set_values(self.game._last_roll)
+        self.status.setText("读档完成")
+        self._refresh_purchase_controls()
+
+    def _after_trade(self, ok: bool, message: str) -> None:
+        self.status.setText(message)
+        self.log_pane.refresh()
+        for panel in self._player_panels:
+            panel.refresh()
+        self.stock_panel.refresh()
 
     def _build_body(self):
         central = QWidget(); self.setCentralWidget(central)
@@ -365,6 +496,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(players_title)
         self.players_grid = QGridLayout()
         left_layout.addLayout(self.players_grid)
+        self.stock_panel = StockPanel()
+        self.stock_panel.on_trade = self._after_trade
+        left_layout.addWidget(self.stock_panel)
         left_layout.addStretch()
         box.addWidget(left)
 
@@ -416,6 +550,7 @@ class MainWindow(QMainWindow):
         self._played_log_count = 0
         self.dice_view.set_values(self.game._last_roll)
         self._sync_players()
+        self.stock_panel.set_game(self.game, self.human_index)
         self.board_view.set_game(self.game)
         self.log_pane.game = self.game
         self.log_pane.refresh()
@@ -515,6 +650,7 @@ class MainWindow(QMainWindow):
             self.dice_view.set_values(self.game._last_roll)
         for panel in self._player_panels:
             panel.refresh()
+        self.stock_panel.refresh()
         self._play_sounds_for_new_logs()
         if self.game and self.game.is_won():
             self.status.setText("游戏结束 · " + (self.game.winner.name or "") + " 获胜!")
@@ -531,6 +667,7 @@ class MainWindow(QMainWindow):
         "build": "buy",
         "rent": "rent",
         "税收": "event",
+        "股票": "buy",
         "坐牢": "jail",
         "牢房": "jail",
         "出狱": "event",
