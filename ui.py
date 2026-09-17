@@ -26,6 +26,7 @@ from game import game as game_engine
 from game.player import Player
 from game.board import Board
 from game.tile_types import TileType
+from game.bank import LOAN_OVERDUE_TURNS
 
 import sound
 import save
@@ -437,10 +438,11 @@ class BankPanel(QWidget):
         )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        title = QLabel("🏦 银行（存款 1%/回合 · 贷款 2%/回合）")
+        title = QLabel("🏦 银行（存款 5%/圈 · 贷款 10%/圈，逾期 20%）")
         title.setStyleSheet("font-weight: bold; font-size: 12px; color: #176d5b;")
         layout.addWidget(title)
         self.balance_label = QLabel("存款 ¥0 · 贷款 ¥0 · 现金 ¥0")
+        self.balance_label.setWordWrap(True)
         self.balance_label.setStyleSheet("color: #444; font-size: 11px;")
         layout.addWidget(self.balance_label)
         row = QHBoxLayout()
@@ -473,12 +475,15 @@ class BankPanel(QWidget):
 
     def refresh(self):
         if self.game is None:
-            self.balance_label.setText("存款 ¥0 · 贷款 ¥0 · 现金 ¥0")
+            self.balance_label.setText("（未开始）")
             return
-        p = self.game.players[self.human_index]
-        self.balance_label.setText(
-            f"存款 ¥{p.bank} · 贷款 ¥{p.loan} · 现金 ¥{p.money}"
-        )
+        lines = []
+        for i, p in enumerate(self.game.players):
+            avatar = PLAYER_AVATARS[i % len(PLAYER_AVATARS)]
+            tag = " ⚠️逾期" if p.loan_age >= LOAN_OVERDUE_TURNS else ""
+            me = "（你）" if i == self.human_index else ""
+            lines.append(f"{avatar}{p.name}{me}: 存¥{p.bank} 贷¥{p.loan}{tag}")
+        self.balance_label.setText("\n".join(lines))
 
     def _act(self, op):
         if self.game is None or self.on_bank is None:

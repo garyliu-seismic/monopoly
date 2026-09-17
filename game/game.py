@@ -26,7 +26,7 @@ from game.events import EVENTS
 from game.tile_types import TileType
 from game.stock import StockMarket
 from game.serial import rng_from_json, rng_to_json
-from game.bank import LOAN_LIMIT, LOAN_RATE, deposit_interest, loan_interest
+from game.bank import LOAN_LIMIT, LOAN_RATE, LOAN_OVERDUE_TURNS, deposit_interest, loan_interest
 
 Log = List[Tuple[str, str]]
 
@@ -77,6 +77,7 @@ class Game:
             p.jail_turn = 0
             p.bank = 0
             p.loan = 0
+            p.loan_age = 0
         self.add_log("start", f"游戏开始，共 {len(self.players)} 名玩家")
 
     def add_log(self, phase: str, text: str) -> str:
@@ -103,7 +104,6 @@ class Game:
             raise GameOver("turn limit reached, no winner")
         self.turn += 1
         self.stock_market.tick()
-        self.apply_interest()
         n = len(self.players)
         for _ in range(n):
             self.turn_index = (self.turn_index + 1) % n
@@ -162,6 +162,7 @@ class Game:
         if before + count >= self.board_size:
             player.add(2500)
             self.add_log("起点奖金", f"{player.name} 经过起点 +¥2500")
+            self.apply_interest(player)
         return after
 
     def _land(self, player: Player) -> None:
@@ -352,7 +353,7 @@ class Game:
             return False, f"超过贷款上限 ¥{LOAN_LIMIT}（已贷 ¥{player.loan}）"
         player.add(amount)
         player.loan += amount
-        self.add_log("银行", f"{player.name} 贷款 ¥{amount}（利率 {LOAN_RATE * 100:.0f}%/回合）")
+        self.add_log("银行", f"{player.name} 贷款 ¥{amount}（利率 {LOAN_RATE * 100:.0f}%/圈）")
         return True, f"贷款 ¥{amount}"
 
     def repay(self, player: Player, amount: int) -> tuple[bool, str]:
@@ -366,24 +367,28 @@ class Game:
             return False, f"现金不足（需 ¥{amount}）"
         player.pay(amount)
         player.loan -= amount
+        if player.loan == 0:
+            player.loan_age = 0
         self.add_log("银行", f"{player.name} 还款 ¥{amount}（剩余贷款 ¥{player.loan}）")
         return True, f"还款 ¥{amount}"
 
-    def apply_interest(self) -> None:
-        """Settle deposit / loan interest for every live player once per turn."""
-        for p in self.players:
-            if p.bankrupt:
-                continue
-            if p.bank > 0:
-                interest = deposit_interest(p.bank)
-                if interest > 0:
-                    p.bank += interest
-                    self.add_log("银行", f"{p.name} 存款利息 +¥{interest}")
-            if p.loan > 0:
-                interest = loan_interest(p.loan)
-                if interest > 0:
-                    p.loan += interest
-                    self.add_log("银行", f"{p.name} 贷款利息 +¥{interest}")
+    def apply_interest(self, player: Player) -> None:
+        """Settle one player's deposit / loan interest when they pass GO."""
+        if player.bankrupt:
+            return
+        if player.bank > 0:
+            interest = deposit_interest(player.bank)
+            if interest > 0:
+                player.bank += interest
+                self.add_log("银行", f"{player.name} 存款利息 +¥{interest}")
+        if player.loan > 0:
+            player.loan_age += 1
+            overdue = player.loan_age >= LOAN_OVERDUE_TURNS
+            interest = loan_interest(player.loan, overdue)
+            if interest > 0:
+                player.loan += interest
+                tag = "（逾期 20%）" if overdue else ""
+                self.add_log("银行", f"{player.name} 贷款利息 +¥{interest}{tag}")
 
     def _collect_rent(self, player: Player, owner: Optional[str], rent: int) -> None:
         paid = player.pay(rent)

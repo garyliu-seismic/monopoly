@@ -37,6 +37,7 @@ class Player:
     initial_money: int = 0
     bank: int = 0
     loan: int = 0
+    loan_age: int = 0
     wallets: List[Wallet] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -164,6 +165,7 @@ class Player:
             "initial_money": self.initial_money,
             "bank": self.bank,
             "loan": self.loan,
+            "loan_age": self.loan_age,
             "wallets": [w.to_dict() for w in self.wallets],
         }
 
@@ -187,6 +189,7 @@ class Player:
         p.wallets = [Wallet.from_dict(w) for w in data.get("wallets", [])]
         p.bank = int(data.get("bank", 0))
         p.loan = int(data.get("loan", 0))
+        p.loan_age = int(data.get("loan_age", 0))
         if p.initial_money <= 0:
             p.initial_money = sum(w.money_value for w in p.wallets)
         return p

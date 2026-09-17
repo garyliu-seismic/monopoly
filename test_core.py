@@ -378,15 +378,29 @@ def test_bank_borrow_and_repay():
     assert ok and p.loan == 3000 and p.money == 4000
 
 
-def test_bank_interest_accrues_each_turn():
+def test_bank_interest_accrues_when_passing_go():
     g = make_game(n=1)
     p = g.players[0]
     p.set_money(20000)
     g.deposit(p, 10000)
     g.borrow(p, 5000)
-    g.next_turn()  # 触发利息结算
-    assert p.bank == 10100  # 10000 * 1%
-    assert p.loan == 5100   # 5000 * 2%
+    p.position = 38
+    g.advance(p, 7)  # 经过起点，触发利息结算
+    assert p.bank == 10500  # 10000 * 5%
+    assert p.loan == 5500   # 5000 * 10%
+    assert p.loan_age == 1
+
+
+def test_bank_loan_overdue_rate_doubles():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(20000)
+    g.borrow(p, 5000)
+    for _ in range(3):
+        p.position = 38
+        g.advance(p, 7)
+    assert p.loan_age == 3
+    assert p.loan == 7260  # 5000 -> 5500 -> 6050 -> 7260(逾期 20%)
 
 
 def test_bank_loan_limit():
@@ -410,3 +424,4 @@ def test_bank_serialised_in_save():
     g2 = game_engine.Game.from_dict(g.to_dict())
     assert g2.players[0].bank == 5000
     assert g2.players[0].loan == 2000
+    assert g2.players[0].loan_age == 0
