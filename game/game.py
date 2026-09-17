@@ -179,6 +179,10 @@ class Game:
     def _land_property(self, player: Player, t: object) -> None:
         if t.owner is None:
             if not self.auto_buy:
+                if player.is_bot:
+                    if self._should_bot_buy(player, t):
+                        self._buy_asset(player, t)
+                    return
                 if player.can_pay(t.price):
                     self.pending_purchase = (player, t)
                     self.add_log("buy", f"{player.name} 可购买 {t.name}（¥{t.price}）")
@@ -193,6 +197,19 @@ class Game:
                 self._pay_rent(player, t)
         elif t.house == 0 and self._owns_group(player, t.group):
             self._build_house(player, t)
+
+    def _should_bot_buy(self, player: Player, t: object) -> bool:
+        if not player.can_pay(t.price):
+            return False
+        group_owned = any(
+            self.board.tiles[property_id].group == t.group
+            for property_id in player.properties
+        )
+        if group_owned:
+            return True
+        remaining_cash = player.money - t.price
+        reserve = max(200, t.price // 10)
+        return remaining_cash >= reserve and t.price <= player.money * 0.9
 
     def _build_house(self, player: Player, t: object) -> None:
         cost = int(t.price * 0.5)

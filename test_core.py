@@ -154,3 +154,47 @@ def test_manual_purchase_mode_offers_then_buys_property():
     assert g.buy_pending_asset(player)
     assert g.pending_purchase is None
     assert g.board.tiles[1].owner == player.name
+
+
+def test_bot_buys_property_when_it_completes_a_group():
+    human = Player("玩家1", holds=2)
+    bot = Player("玩家2", is_bot=True, holds=2)
+    g = game_engine.Game([human, bot], seed=1, auto_buy=False)
+    g.start()
+    bot.set_money(2500)
+    bot.properties.append(1)
+    g.board.tiles[1].owner = bot.name
+    bot.position = 3
+
+    g._land(bot)
+
+    assert g.board.tiles[3].owner == bot.name
+    assert g.pending_purchase is None
+
+
+def test_bot_keeps_cash_when_a_new_property_is_too_expensive():
+    human = Player("玩家1", holds=2)
+    bot = Player("玩家2", is_bot=True, holds=2)
+    g = game_engine.Game([human, bot], seed=1, auto_buy=False)
+    g.start()
+    bot.set_money(1800)
+    bot.position = 3
+
+    g._land(bot)
+
+    assert g.board.tiles[3].owner is None
+    assert g.pending_purchase is None
+
+
+def test_bot_declines_an_affordable_property_when_cash_reserve_is_too_low():
+    human = Player("玩家1", holds=2)
+    bot = Player("玩家2", is_bot=True, holds=2)
+    g = game_engine.Game([human, bot], seed=1, auto_buy=False)
+    g.start()
+    bot.set_money(2200)
+    bot.position = 3
+
+    g._land(bot)
+
+    assert g.board.tiles[3].owner is None
+    assert g.pending_purchase is None

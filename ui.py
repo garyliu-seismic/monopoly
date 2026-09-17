@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTextBrowser, QPushButton, QLabel, QFrame,
 )
-from PySide6.QtCore import Qt, QSize, QRect
-from PySide6.QtGui import QColor, QPainter, QFont, QAction
+from PySide6.QtCore import Qt, QPoint, QSize, QRect, QTimer
+from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPolygon
 
 from game import game as game_engine
 from game.player import Player
@@ -51,6 +51,12 @@ class BoardView(QWidget):
         self.board = board
         self.setMinimumSize(720, 600)
         self.setStyleSheet("background: #f4f7f2; border: 1px solid #cad6cc;")
+        self._animation_queue = []
+        self._active_animation = None
+        self._display_positions = {}
+        self._move_timer = QTimer(self)
+        self._move_timer.setInterval(115)
+        self._move_timer.timeout.connect(self._advance_animation)
 
     def _grid(self) -> dict:
         # Board always exposes ``grid`` (tile index -> (row, col)).
@@ -62,7 +68,41 @@ class BoardView(QWidget):
     def set_game(self, game):
         """Store a game reference so a player token can be drawn per tile."""
         self.board_game = game
+        self._animation_queue.clear()
+        self._active_animation = None
+        self._display_positions.clear()
+        self._move_timer.stop()
         self.update()
+
+    def animate_move(self, player_index: int, before: int, after: int) -> None:
+        """Show a token walking each board space while game state resolves immediately."""
+        steps = (after - before) % len(self.board.tiles)
+        if not steps:
+            return
+        path = [(before + offset) % len(self.board.tiles) for offset in range(1, steps + 1)]
+        self._animation_queue.append((player_index, path))
+        if self._active_animation is None:
+            self._start_next_animation()
+
+    def _start_next_animation(self) -> None:
+        if not self._animation_queue:
+            self._active_animation = None
+            return
+        player_index, path = self._animation_queue.pop(0)
+        self._active_animation = (player_index, path, 0)
+        self._move_timer.start()
+
+    def _advance_animation(self) -> None:
+        player_index, path, step = self._active_animation
+        self._display_positions[player_index] = path[step]
+        self.update()
+        if step + 1 == len(path):
+            self._display_positions.pop(player_index, None)
+            self._move_timer.stop()
+            self._active_animation = None
+            self._start_next_animation()
+            return
+        self._active_animation = (player_index, path, step + 1)
 
     def paintEvent(self, _event):
         qp = QPainter(self)
@@ -127,19 +167,24 @@ class BoardView(QWidget):
             board_tiles = board_game.board.tiles
             pcolor = ["#e53935", "#1e88e5", "#43a047", "#8e24aa"]
             for idx, pl in enumerate(board_game.players):
-                tile = board_tiles[pl.position]
+                display_position = self._display_positions.get(idx, pl.position)
+                tile = board_tiles[display_position]
                 r, c = grid.get(tile.tile, (0, 0))
                 if not isinstance(r, int) or not isinstance(c, int):
                     r, c = 0, tile.tile % 3
                 xc, yc = pos(c, r)
-                radius = max(7, int(cell * 0.15))
-                off = (idx % 2) * radius * 2 - radius
-                ep = QRect(int(xc + cell / 2 - radius + off),
-                           int(yc + cell * 0.72 - radius + (idx // 2) * radius * 2),
-                           int(radius * 2), int(radius * 2))
-                qp.setPen(QColor(pcolor[idx % len(pcolor)]))
-                qp.setBrush(QColor(pcolor[idx % len(pcolor)]))
-                qp.drawEllipse(ep)
+                flag_size = max(10, int(cell * 0.17))
+                flag_x = int(xc + cell * (0.3 + (idx % 2) * 0.28))
+                flag_y = int(yc + cell * (0.6 + (idx // 2) * 0.16))
+                flag_color = QColor(pcolor[idx % len(pcolor)])
+                qp.setPen(flag_color)
+                qp.drawLine(flag_x, flag_y - flag_size, flag_x, flag_y + flag_size)
+                qp.setBrush(flag_color)
+                qp.drawPolygon(QPolygon([
+                    QPoint(flag_x, flag_y - flag_size),
+                    QPoint(flag_x + flag_size, flag_y - flag_size + flag_size // 3),
+                    QPoint(flag_x, flag_y - flag_size + flag_size * 2 // 3),
+                ]))
         qp.end()
 
 
@@ -316,8 +361,10 @@ class MainWindow(QMainWindow):
         p = self.game._current_player()
         if p is None or p.bankrupt:
             return
+        player_index = self.game.players.index(p)
+        before = p.position
         self.game.run_step()
-        self.board_view.update()
+        self.board_view.animate_move(player_index, before, p.position)
 
     def step(self):
         if not self.game:
@@ -360,8 +407,6 @@ class MainWindow(QMainWindow):
             if self._is_human_turn():
                 break
             self._act_current()
-            if self.game.pending_purchase is not None:
-                self.game.buy_pending_asset(current)
         self._after_step()
 
     def _after_step(self):
