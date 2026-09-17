@@ -69,18 +69,21 @@ class Player:
     def spend(self, amount: int) -> int:
         """Pay up to ``amount`` using the 富翁 whole-wallet rule.
 
-        Spends from the first cash wallet; if that wallet still can't cover
-        the amount the remaining debt is ignored (the player is simply
-        short). Returns the amount actually paid."""
+        Spends first wallet, then moves up the chain until the whole amount
+        (or all available cash) is drained.
+        """
         if amount <= 0:
             return 0
-        # 富翁 whole-wallet rule: spend the first cash wallet first; the rest
-        # drains later wallets as needed. Total payable is simply our cash.
-        paid = min(amount, self.money)
-        w = self.first_wallet_with()
-        if w is not None:
-            w.spend(paid)
-        return paid
+        remaining = amount
+        for w in self.wallets:
+            if w.money_value <= 0:
+                continue
+            paid = w.spend(remaining)
+            remaining -= paid
+            if remaining <= 0:
+                break
+        paid_total = amount - remaining
+        return paid_total
 
     def transfer(self, target: "Player", amount: int) -> bool:
         """Move cash (whole wallets) from self to target."""
