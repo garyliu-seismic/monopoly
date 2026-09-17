@@ -51,12 +51,8 @@ class BoardView(QWidget):
         self.board = board
 
     def _grid(self) -> dict:
-        if hasattr(self.board, "grid") and isinstance(self.board.grid, dict):
-            return self.board.grid
-        return self.board.tile_index  # fallback set in Game.setup
-
-    def _fallback_grid(self) -> dict:
-        return {t.tile: (t.tile // 3, t.tile % 3) for t in self.board.tiles}
+        # Board always exposes ``grid`` (tile index -> (row, col)).
+        return self.board.grid
 
     def sizeHint(self) -> QSize:
         cols = max((c for _, c in self._grid().values() if isinstance(c, int)), default=0)
@@ -66,7 +62,6 @@ class BoardView(QWidget):
     def paintEvent(self, _event):
         qp = QPainter(self)
         grid = self._grid()
-        x_max = max((c for _, c in grid.values() if isinstance(grid.get(0), tuple and tuple)), default=0) if False else 3
         for tile in self.board.tiles:
             r, c = grid.get(tile.tile, (0, 0))
             if not isinstance(r, int) or not isinstance(c, int):

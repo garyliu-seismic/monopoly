@@ -49,6 +49,16 @@ class Player:
     def cash_balance(self) -> int:
         return self.money  # single alias in the MVP
 
+    def set_money(self, amount: int) -> None:
+        """Set total cash (spread across wallets); used by tests/AI."""
+        if amount <= 0:
+            for w in self.wallets:
+                w.money_value = 0
+            return
+        base, rem = divmod(amount, len(self.wallets))
+        for i, w in enumerate(self.wallets):
+            w.money_value = base + (rem if i == 0 else 0)
+
     def first_wallet_with(self) -> Wallet | None:
         return next((w for w in self.wallets if w.money_value > 0), None)
 

@@ -171,8 +171,9 @@ class Game:
             self.add_log("build", f"{player.name} 为 {t.name} 升级（-{cost}）")
 
     def _pay_rent(self, player: Player, t: Tile) -> None:
-        base = t.price if t.price else t.price
-        rent = base // 10
+        base = t.price
+        rent = (base // 10) * (1 + 2 * t.house)
+        rent = max(rent, base // 10)
         paid = player.spend(rent)
         cred = next((pl for pl in self.players if pl.name == t.owner), None)
         if cred is not None:
