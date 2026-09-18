@@ -12,19 +12,22 @@ Widgets
 from __future__ import annotations
 
 import sys
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTextBrowser, QPushButton, QLabel, QFrame,
-    QComboBox, QSpinBox, QFileDialog,
+    QDialog, QProgressBar, QComboBox, QSpinBox, QFileDialog, QMessageBox,
 )
-from PySide6.QtCore import Qt, QPoint, QSize, QRect, QTimer
-from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen
+from PySide6.QtCore import (
+    Qt, QPoint, QSize, QRect, QTimer, QObject, QPropertyAnimation, QAbstractAnimation,
+)
+from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen, QCursor
 
 from game import game as game_engine
 from game.player import Player
-from game.board import Board
+from game.board import Board, build_map
+from game.maps import by_key, available_maps
 from game.tile_types import TileType
 from game.bank import LOAN_OVERDUE_TURNS
 
@@ -62,9 +65,15 @@ class BoardView(QWidget):
         self._animation_queue = []
         self._active_animation = None
         self._display_positions = {}
+        self._active_player_index = -1
         self._move_timer = QTimer(self)
         self._move_timer.setInterval(115)
         self._move_timer.timeout.connect(self._advance_animation)
+
+    def set_active_highlight(self, index: int) -> None:
+        """Highlight the token of player ``index`` (``-1`` clears it)."""
+        self._active_player_index = index
+        self.update()
 
     def _grid(self) -> dict:
         # Board always exposes ``grid`` (tile index -> (row, col)).
@@ -187,6 +196,7 @@ class BoardView(QWidget):
 
         if board_game is not None:
             board_tiles = board_game.board.tiles
+            active_idx = self._active_player_index
             for idx, pl in enumerate(board_game.players):
                 if pl.bankrupt:
                     continue
@@ -199,6 +209,11 @@ class BoardView(QWidget):
                 token_r = max(9, int(cell * 0.14))
                 cx = int(xc + cell * (0.28 + (idx % 2) * 0.30))
                 cy = int(yc + cell * (0.60 + (idx // 2) * 0.18))
+                if active_idx >= 0 and idx == active_idx:
+                    # Active player: draw a bright pulsing ring.
+                    qp.setPen(QPen(QColor("#147d68"), int(token_r * 0.85)))
+                    qp.setBrush(QColor("#0f5b4b"))
+                    qp.drawEllipse(cx - token_r, cy - token_r, token_r * 2, token_r * 2)
                 color = QColor(PLAYER_COLORS[idx % len(PLAYER_COLORS)])
                 qp.setBrush(color)
                 qp.setPen(QPen(QColor("#ffffff"), 2))
@@ -782,6 +797,7 @@ class MainWindow(QMainWindow):
         self._play_sounds_for_new_logs()
         self._update_status()
         self._refresh_purchase_controls()
+        self._refresh_token_highlight()
 
     _REPORT_EMOJI = {
         "roll": "🎲", "起点奖金": "🎉", "税收": "💰", "rent": "💸",
@@ -833,6 +849,19 @@ class MainWindow(QMainWindow):
             self.status.setText(self._human_report())
         else:
             self.status.setText(f"轮到你行动\n{cash}")
+
+    def _refresh_token_highlight(self) -> None:
+        """Recompute and push the active player index to the board view."""
+        if self.game is None:
+            return
+        if self.game.is_won():
+            self.board_view.set_active_highlight(-1)
+            return
+        try:
+            idx = self.game.players.index(self.game._current_player())
+        except (ValueError, IndexError):
+            idx = -1
+        self.board_view.set_active_highlight(idx)
 
     _PHASE_SOUNDS = {
         "roll": "roll",
