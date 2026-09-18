@@ -173,5 +173,30 @@ def _grid(size: int) -> Dict[int, tuple[int, int]]:
     return {i: coords[i] for i in range(size)}
 
 
-def build_board(size: int = 40, rng: random.Random | None = None) -> Board:
-    return Board(size=size, rng=rng)
+def build_board(
+    definitions: list,
+    size: int | None = None,
+    rng: random.Random | None = None,
+) -> Board:
+    """Build a board from custom ``(name, category, group, price)`` tiles.
+
+    ``category`` values are the :class:`game.tile_types.TileType` **names**.
+    ``size`` defaults to the number of supplied tiles (min 12 so the classic
+    ring still resolves).
+    """
+    size = size or len(definitions)
+    board = Board(size=size, rng=rng)
+    for i, (name, cat, group, price) in enumerate(definitions):
+        board.tiles[i] = Tile(
+            tile=i,
+            name=name,
+            category=TileType[cat],
+            group=group,
+            price=price,
+        )
+    return board
+
+
+def build_map(board_map) -> Board:
+    """Convenience: build a board from a :class:`game.maps.GameMap`."""
+    return build_board(board_map.as_definitions(), size=len(board_map.tiles))
