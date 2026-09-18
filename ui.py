@@ -12,7 +12,8 @@ Widgets
 from __future__ import annotations
 
 import sys
-from typing import Callable, List, Optional
+from itertools import count
+from typing import Callable, List, Optional, Iterable
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -30,6 +31,7 @@ from game.board import Board, build_map
 from game.maps import by_key, available_maps
 from game.tile_types import TileType
 from game.bank import LOAN_OVERDUE_TURNS
+from game.prompt import card_event_display, card_event_index, CARD_KIND, CARD_ICON
 
 import sound
 import save
@@ -529,6 +531,17 @@ class MainWindow(QMainWindow):
         self._played_log_count = 0
         self._human_log_marker = 0
         self._show_human_report = False
+        self._card_render_marker = -1
+        self._card_index = 0
+        self._win_cells: List = []
+        self._win_iter: Optional[Iterable[int]] = None
+        # turn-countdown + win-flash UI state
+        self.ui_timer = QTimer(self)
+        self.ui_timer.setInterval(100)
+        self.ui_timer.timeout.connect(self._on_ui_timer_tick)
+        self._turn_timer_state = {}
+        self._win_flash = 0
+        self._win_anim: Optional[QTimer] = None
         self._build_menu()
         self._build_body()
 
