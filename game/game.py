@@ -43,6 +43,7 @@ class Game:
         seed: Optional[int] = None,
         max_turns: int = 1000,
         auto_buy: bool = True,
+        human_index: int = -1,
     ) -> None:
         self.log: Log = []
         self.board: Board = board or Board()
@@ -57,6 +58,7 @@ class Game:
         self.phase = "setup"
         self.winner: Optional[Player] = None
         self.pending_purchase: Optional[tuple[Player, Tile]] = None
+        self.human_index: int = human_index
         self._last_roll: Tuple[int, int] = (0, 0)
         self._stacks: dict[str, List[str]] = self._build_stacks()
         self.stock_market = StockMarket(seed)
