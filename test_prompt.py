@@ -1,7 +1,13 @@
 """Tests for human cardprompt helpers (pure logic, no GUI)."""
 from __future__ import annotations
 
-from game.prompt import card_event_index, CARD_ICON, CARD_KIND, cleaned_prompt_text
+from game.prompt import (
+    card_event_index,
+    CARD_ICON,
+    CARD_KIND,
+    cleaned_prompt_text,
+    card_event_display,
+)
 
 
 def _log(*events):
@@ -43,9 +49,22 @@ def test_card_event_index_ignores_other_players():
 
 
 def test_prompt_text_helpers():
-    assert CARD_ICON == {"机会": "🎁", "社区": "🎉"}
+    assert CARD_ICON == {"机会": "\U0001F381", "社区": "\U0001F389"}
     assert CARD_KIND == {"机会": "chance", "社区": "community"}
     text = "玩家1 社区：前进到监狱"
     assert cleaned_prompt_text(text, "玩家1") == "社区：前进到监狱"
     # Missing human name -> returned unchanged.
     assert cleaned_prompt_text("玩家2 抽到一张卡", "玩家1") == "玩家2 抽到一张卡"
+
+
+def test_card_event_display_strips_name_for_card():
+    assert card_event_display(("机会", "玩家1 机会卡: 获得 +2000"), "玩家1") == (
+        "机会", "机会卡: 获得 +2000",
+    )
+
+
+def test_card_event_display_leaves_non_card_untouched():
+    # A roll/tax/etc entry is not a card; keep it verbatim (name intact).
+    assert card_event_display(("roll", "玩家1 掷出 5"), "玩家1") == (
+        "roll", "玩家1 掷出 5",
+    )

@@ -40,3 +40,16 @@ def cleaned_prompt_text(text: str, human_name: str) -> str:
     if text.startswith(marker):
         return text[len(marker):]
     return text
+
+
+def card_event_display(log_entry, human_name: str, icon=CARD_ICON, kind=CARD_KIND):
+    """Render ``(phase, label)`` for the UI from an ``(phase, text)`` log entry.
+
+    Cards keep the human name stripped so a modal shows a clean message; the
+    ``roll``/``tax`` entries (not cards) are returned unchanged with their
+    leading name intact.
+    """
+    phase, text = log_entry
+    if phase not in icon:
+        return phase, text
+    return phase, cleaned_prompt_text(text, human_name)
