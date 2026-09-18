@@ -24,9 +24,9 @@ def test_wallet_transfer_and_spend():
     assert a.money_value == 40 and b.money_value == 60
 
     p = Player("solo", holds=2)
-    assert p.money == 1800
+    assert p.money == 15000
     paid = p.spend(999999)
-    assert paid == 1800
+    assert paid == 15000
     assert p.money == 0
     assert p.is_bankrupt()
 
@@ -38,9 +38,9 @@ def test_dice_distribution_range():
         assert len(d.values) == 2
 
 
-def test_board_has_34_tiles_and_grid():
-    b = board_mod.Board(34)
-    assert len(b.tiles) == 34
+def test_board_has_40_tiles_and_grid():
+    b = board_mod.Board(40)
+    assert len(b.tiles) == 40
     assert b.tiles[0].category == TileType.GO
     for t in b.tiles:
         assert t.tile == b.tiles.index(t)
@@ -48,15 +48,15 @@ def test_board_has_34_tiles_and_grid():
 
 
 def test_board_grid_is_a_continuous_monopoly_perimeter():
-    b = board_mod.Board(34)
+    b = board_mod.Board(40)
     positions = list(b.grid.values())
 
-    assert len(set(positions)) == 34
+    assert len(set(positions)) == 40
     assert b.grid[0] == (0, 0)
-    assert b.grid[9] == (0, 9)
-    assert b.grid[17] == (8, 9)
-    assert b.grid[26] == (8, 0)
-    assert all(row in (0, 8) or col in (0, 9) for row, col in positions)
+    assert b.grid[10] == (0, 10)
+    assert b.grid[20] == (10, 10)
+    assert b.grid[30] == (10, 0)
+    assert all(row in (0, 10) or col in (0, 10) for row, col in positions)
 
 
 def test_full_run_completes_without_crash_and_conserves_money():
@@ -111,16 +111,16 @@ def test_railroads_are_purchasable_and_collect_scaled_rent():
     owner.set_money(10000)
     visitor.set_money(10000)
 
-    for tile_index in (5, 17):
+    for tile_index in (5, 15):
         owner.position = tile_index
         g._land(owner)
 
     visitor.position = 5
     g._land(visitor)
 
-    assert owner.properties == [5, 17]
-    assert visitor.money == 9900
-    assert owner.money == 9100
+    assert owner.properties == [5, 15]
+    assert visitor.money == 9600
+    assert owner.money == 6400
 
 
 def test_utilities_collect_rent_from_roll_and_full_set():
@@ -129,7 +129,7 @@ def test_utilities_collect_rent_from_roll_and_full_set():
     owner.set_money(10000)
     visitor.set_money(10000)
 
-    for tile_index in (12, 25):
+    for tile_index in (12, 28):
         owner.position = tile_index
         g._land(owner)
 
@@ -137,9 +137,9 @@ def test_utilities_collect_rent_from_roll_and_full_set():
     visitor.position = 12
     g._land(visitor)
 
-    assert owner.properties == [12, 25]
-    assert visitor.money == 9930
-    assert owner.money == 6570
+    assert owner.properties == [12, 28]
+    assert visitor.money == 9300
+    assert owner.money == 7200
 
 
 def test_manual_purchase_mode_offers_then_buys_property():
@@ -198,3 +198,230 @@ def test_bot_declines_an_affordable_property_when_cash_reserve_is_too_low():
 
     assert g.board.tiles[3].owner is None
     assert g.pending_purchase is None
+
+
+def test_windfall_event_adds_cash():
+    from game import events
+    p = Player("P1", holds=2)
+    g = game_engine.Game([p], seed=1)
+    g.start()
+    p.set_money(1000)
+    events.EVENTS["windfall"](g, p)
+    assert p.money == 4000
+
+
+def test_house_fire_event_deducts_cash():
+    from game import events
+    p = Player("P1", holds=2)
+    g = game_engine.Game([p], seed=1)
+    g.start()
+    p.set_money(1000)
+    events.EVENTS["house_fire"](g, p)
+    assert p.money == 0
+
+
+def test_collect_all_event_takes_from_others():
+    from game import events
+    a = Player("A", holds=2)
+    b = Player("B", holds=2)
+    g = game_engine.Game([a, b], seed=1)
+    g.start()
+    a.set_money(1000)
+    b.set_money(1000)
+    events.EVENTS["collect_all"](g, a)
+    assert a.money == 1800
+    assert b.money == 200
+
+
+def test_pay_each_event_gives_to_others():
+    from game import events
+    a = Player("A", holds=2)
+    b = Player("B", holds=2)
+    g = game_engine.Game([a, b], seed=1)
+    g.start()
+    a.set_money(1000)
+    b.set_money(1000)
+    events.EVENTS["pay_each"](g, a)
+    assert a.money == 200
+    assert b.money == 1800
+
+
+def test_full_run_with_expanded_events_does_not_crash():
+    g = make_game(seed=7, n=4)
+    g.run(steps=200)
+    assert len(g.log) > 0
+
+
+def test_stock_buy_and_sell():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(10000)
+    price = g.stock_market.get("TECH").price
+    ok, _ = g.buy_stock(p, "TECH", 10)
+    assert ok
+    assert p.stocks["TECH"] == 10
+    assert p.money == 10000 - price * 10
+    ok, _ = g.sell_stock(p, "TECH", 4)
+    assert ok
+    assert p.stocks["TECH"] == 6
+
+
+def test_stock_buy_rejects_when_cash_insufficient():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(50)
+    ok, _ = g.buy_stock(p, "REAL", 1)  # 地产股 120 > 50
+    assert not ok
+    assert p.stocks.get("REAL", 0) == 0
+
+
+def test_stock_sell_rejects_when_holding_insufficient():
+    g = make_game(n=1)
+    p = g.players[0]
+    ok, _ = g.sell_stock(p, "TECH", 5)
+    assert not ok
+    assert p.stocks.get("TECH", 0) == 0
+
+
+def test_stock_prices_change_each_turn():
+    g = make_game(n=1)
+    before = [s.price for s in g.stock_market.stocks]
+    g.next_turn()
+    after = [s.price for s in g.stock_market.stocks]
+    assert after != before
+
+
+def test_save_load_roundtrip():
+    import os
+    import tempfile
+    from save import load_game, save_game
+
+    g = make_game(n=2)
+    p = g.players[0]
+    p.set_money(5000)
+    g.buy_stock(p, "TECH", 3)
+    g.run(steps=5)
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "s.json")
+        save_game(g, path)
+        g2 = load_game(path)
+
+    assert [pl.name for pl in g2.players] == [pl.name for pl in g.players]
+    assert g2.turn == g.turn
+    assert g2.players[0].money == g.players[0].money
+    assert g2.players[0].stocks == g.players[0].stocks
+    assert [s.price for s in g2.stock_market.stocks] == [s.price for s in g.stock_market.stocks]
+    assert [t.owner for t in g2.board.tiles] == [t.owner for t in g.board.tiles]
+    # 加载后仍可继续运行
+    g2.run(steps=3)
+
+
+def test_build_house_on_three_property_group():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(100000)
+    for idx in (6, 8, 9):  # lightblue 三块
+        p.position = idx
+        g._land(p)
+    # 踩到自己地产，拥有全集团 → 盖房
+    p.position = 6
+    g._land(p)
+    assert g.board.tiles[6].house == 1
+
+
+def test_rent_scales_with_houses():
+    g = make_game(n=2)
+    owner, visitor = g.players
+    owner.set_money(100000)
+    visitor.set_money(100000)
+    for idx in (6, 8, 9):
+        owner.position = idx
+        g._land(owner)
+    owner.position = 6
+    g._land(owner)
+    assert g.board.tiles[6].house == 1
+
+    visitor.position = 6
+    g._land(visitor)
+    base = g.board.tiles[6].price // 20  # 75
+    expected = base * (1 + 2 * 1)        # 225
+    assert visitor.money == 100000 - expected
+
+
+def test_player_initial_money_recorded_and_serialised():
+    p = Player("P1", holds=2)
+    assert p.initial_money == 15000
+    p.set_money(500)
+    assert p.initial_money == 15000  # 初始资金不随 set_money 改变
+    restored = Player.from_dict(p.to_dict())
+    assert restored.initial_money == 15000
+
+
+def test_bank_deposit_and_withdraw():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(5000)
+    ok, _ = g.deposit(p, 2000)
+    assert ok and p.bank == 2000 and p.money == 3000
+    ok, _ = g.withdraw(p, 800)
+    assert ok and p.bank == 1200 and p.money == 3800
+
+
+def test_bank_borrow_and_repay():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(1000)
+    ok, _ = g.borrow(p, 5000)
+    assert ok and p.loan == 5000 and p.money == 6000
+    ok, _ = g.repay(p, 2000)
+    assert ok and p.loan == 3000 and p.money == 4000
+
+
+def test_bank_interest_accrues_when_passing_go():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(20000)
+    g.deposit(p, 10000)
+    g.borrow(p, 5000)
+    p.position = 38
+    g.advance(p, 7)  # 经过起点，触发利息结算
+    assert p.bank == 10500  # 10000 * 5%
+    assert p.loan == 5500   # 5000 * 10%
+    assert p.loan_age == 1
+
+
+def test_bank_loan_overdue_rate_doubles():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(20000)
+    g.borrow(p, 5000)
+    for _ in range(3):
+        p.position = 38
+        g.advance(p, 7)
+    assert p.loan_age == 3
+    assert p.loan == 7260  # 5000 -> 5500 -> 6050 -> 7260(逾期 20%)
+
+
+def test_bank_loan_limit():
+    from game.bank import LOAN_LIMIT
+    g = make_game(n=1)
+    p = g.players[0]
+    ok, _ = g.borrow(p, LOAN_LIMIT + 1)
+    assert not ok
+    ok, _ = g.borrow(p, LOAN_LIMIT)
+    assert ok
+    ok, _ = g.borrow(p, 1)
+    assert not ok
+
+
+def test_bank_serialised_in_save():
+    g = make_game(n=1)
+    p = g.players[0]
+    p.set_money(20000)
+    g.deposit(p, 5000)
+    g.borrow(p, 2000)
+    g2 = game_engine.Game.from_dict(g.to_dict())
+    assert g2.players[0].bank == 5000
+    assert g2.players[0].loan == 2000
+    assert g2.players[0].loan_age == 0

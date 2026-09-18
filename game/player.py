@@ -13,7 +13,7 @@ from typing import Dict, List
 from .money import Wallet
 
 
-def _new_wallets(held: int, start: int = 1_800) -> List[Wallet]:
+def _new_wallets(held: int, start: int = 15_000) -> List[Wallet]:
     """Split ``start`` cash fairly across ``held`` wallets."""
     held = max(1, held)
     base, rem = divmod(start, held)
@@ -27,17 +27,24 @@ class Player:
     holds: int = 2
     properties: List[int] = field(default_factory=list)
     houses: Dict[int, int] = field(default_factory=dict)
+    stocks: Dict[str, int] = field(default_factory=dict)
     bankrupt: bool = False
     bail: bool = False
     in_prison: bool = False
     jail_counter: int = 0
     jail_turn: int = 0
     position: int = 0
+    initial_money: int = 0
+    bank: int = 0
+    loan: int = 0
+    loan_age: int = 0
     wallets: List[Wallet] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if len(self.wallets) < self.holds:
             self.wallets = _new_wallets(self.holds)
+        if self.initial_money <= 0:
+            self.initial_money = sum(w.money_value for w in self.wallets)
 
     # --------------------------------------------------------------- money
     @property
@@ -139,6 +146,53 @@ class Player:
 
     def get_wallet_ids(self) -> List[int]:
         return list(range(len(self.wallets)))
+
+    # ------------------------------------------------------------ serialise
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "is_bot": self.is_bot,
+            "holds": self.holds,
+            "properties": list(self.properties),
+            "houses": {str(k): v for k, v in self.houses.items()},
+            "stocks": dict(self.stocks),
+            "bankrupt": self.bankrupt,
+            "bail": self.bail,
+            "in_prison": self.in_prison,
+            "jail_counter": self.jail_counter,
+            "jail_turn": self.jail_turn,
+            "position": self.position,
+            "initial_money": self.initial_money,
+            "bank": self.bank,
+            "loan": self.loan,
+            "loan_age": self.loan_age,
+            "wallets": [w.to_dict() for w in self.wallets],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Player":
+        p = cls(
+            name=data["name"],
+            is_bot=data.get("is_bot", False),
+            holds=data.get("holds", 2),
+            properties=list(data.get("properties", [])),
+            houses={int(k): v for k, v in data.get("houses", {}).items()},
+            bankrupt=data.get("bankrupt", False),
+            bail=data.get("bail", False),
+            in_prison=data.get("in_prison", False),
+            jail_counter=data.get("jail_counter", 0),
+            jail_turn=data.get("jail_turn", 0),
+            position=data.get("position", 0),
+            initial_money=data.get("initial_money", 0),
+        )
+        p.stocks = {str(k): int(v) for k, v in data.get("stocks", {}).items()}
+        p.wallets = [Wallet.from_dict(w) for w in data.get("wallets", [])]
+        p.bank = int(data.get("bank", 0))
+        p.loan = int(data.get("loan", 0))
+        p.loan_age = int(data.get("loan_age", 0))
+        if p.initial_money <= 0:
+            p.initial_money = sum(w.money_value for w in p.wallets)
+        return p
 
 
 def player_from_dict(d: dict) -> "Player":
