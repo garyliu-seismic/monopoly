@@ -32,6 +32,7 @@ from game.maps import by_key, available_maps
 from game.tile_types import TileType
 from game.bank import LOAN_OVERDUE_TURNS
 from game.prompt import card_event_display, card_event_index, CARD_KIND, CARD_ICON
+from game.timer import TurnTimer
 
 import sound
 import save
@@ -68,6 +69,8 @@ class BoardView(QWidget):
         self._active_animation = None
         self._display_positions = {}
         self._active_player_index = -1
+        self._win_cells: List[QPoint] = []
+        self._win_flash = 0
         self._move_timer = QTimer(self)
         self._move_timer.setInterval(115)
         self._move_timer.timeout.connect(self._advance_animation)
@@ -227,6 +230,17 @@ class BoardView(QWidget):
                     Qt.AlignCenter,
                     emoji,
                 )
+        if self._win_cells:
+            for tile_index, flash_size in self._win_cells:
+                r, c = grid.get(tile_index, (0, 0))
+                if not isinstance(r, int) or not isinstance(c, int):
+                    continue
+                wx, wy = pos(c, r)
+                wr = max(6, int(flash_size * cell))
+                # A pulsing amber/range overlay highlights the winning tiles
+                # across the whole board when a game ends.
+                qp.setPen(QPen(QColor("#ffd54f") if self._win_flash < 8 else QColor("#ff7043"), 3))
+                qp.drawRect(QRect(int(wx) + cell - wr, int(wy) + cell - wr, wr * 2, wr * 2))
         qp.end()
 
 
@@ -539,9 +553,12 @@ class MainWindow(QMainWindow):
         self.ui_timer = QTimer(self)
         self.ui_timer.setInterval(100)
         self.ui_timer.timeout.connect(self._on_ui_timer_tick)
-        self._turn_timer_state = {}
+        self._turn_timer_state = None
         self._win_flash = 0
         self._win_anim: Optional[QTimer] = None
+        self._turn_timer = TurnTimer(base_seconds=90)
+        self._turn_countdown_bar: Optional[QProgressBar] = None
+        self.board_view: BoardView = BoardView(Board())
         self._build_menu()
         self._build_body()
 
@@ -589,6 +606,13 @@ class MainWindow(QMainWindow):
             return
         self.game = loaded
         self._played_log_count = 0
+        self._turn_timer.reset()
+        self._turn_timer_state = None
+        self._card_render_marker = -1
+        self._win_cells = []
+        self._win_flash = 0
+        if self._win_anim is not None:
+            self._win_anim.stop()
         self._sync_players()
         self.stock_panel.set_game(self.game, self.human_index)
         self.bank_panel.set_game(self.game, self.human_index)
@@ -598,6 +622,8 @@ class MainWindow(QMainWindow):
         self.dice_view.set_values(self.game._last_roll)
         self.status.setText("读档完成")
         self._refresh_purchase_controls()
+        self._render_turn_timer()
+        self._refresh_token_highlight()
 
     def _after_trade(self, ok: bool, message: str) -> None:
         self.status.setText(message)
@@ -650,6 +676,16 @@ class MainWindow(QMainWindow):
         cb.addWidget(self.status)
         self.dice_view = DiceView()
         cb.addWidget(self.dice_view)
+        self._turn_countdown_bar = QProgressBar()
+        self._turn_countdown_bar.setRange(0, 100)
+        self._turn_countdown_bar.setValue(100)
+        self._turn_countdown_bar.setTextVisible(True)
+        self._turn_countdown_bar.setFixedHeight(26)
+        self._turn_countdown_bar.setStyleSheet(
+            "QProgressBar { background: #e1eee5; border: 1px solid #176d5b; border-radius: 4px; color: #176d5b; font-weight: bold; }"
+            "QProgressBar::chunk { background: #176d5b; border-radius: 3px; }"
+        )
+        cb.addWidget(self._turn_countdown_bar)
         self.bank_panel = BankPanel()
         self.bank_panel.on_bank = self._after_bank
         cb.addWidget(self.bank_panel)
@@ -684,6 +720,13 @@ class MainWindow(QMainWindow):
         self.game = game_engine.Game(players, seed=1, auto_buy=False)
         self.game.start()
         self._played_log_count = 0
+        self._turn_timer.reset()
+        self._turn_timer_state = None
+        self._card_render_marker = -1
+        self._win_cells = []
+        self._win_flash = 0
+        if self._win_anim is not None:
+            self._win_anim.stop()
         self.dice_view.set_values(self.game._last_roll)
         self._sync_players()
         self.stock_panel.set_game(self.game, self.human_index)
@@ -693,6 +736,8 @@ class MainWindow(QMainWindow):
         self.log_pane.refresh()
         self.status.setText(f"游戏开始 · {len(players)} 名玩家")
         self._refresh_purchase_controls()
+        self._render_turn_timer()
+        self._refresh_token_highlight()
 
     def _sync_players(self):
         for p in self._player_panels:
@@ -810,6 +855,9 @@ class MainWindow(QMainWindow):
         self._play_sounds_for_new_logs()
         self._update_status()
         self._refresh_purchase_controls()
+        self._render_turn_timer()
+        self._check_win_condition()
+        self._check_card_prompt()
         self._refresh_token_highlight()
 
     _REPORT_EMOJI = {
@@ -840,6 +888,107 @@ class MainWindow(QMainWindow):
         lines.extend(others)
         lines.append(f"💵 现金：¥{human.money}")
         return "\n".join(lines)
+
+    def _render_turn_timer(self) -> None:
+        """Drive the richman-turn style countdown bar; auto-run if exceeded."""
+        if self.game is None:
+            return
+        human = self.game.players[self.human_index]
+        self._turn_timer.name = human.name
+        if self.game._current_player() is human and not human.bankrupt:
+            turn_state = (id(self.game), self.game.turn, self.game.turn_index)
+            if turn_state != self._turn_timer_state:
+                self._turn_timer.start()
+                self._turn_timer_state = turn_state
+            if not self._turn_timer.passed() and not self.ui_timer.isActive():
+                self.ui_timer.start()
+        else:
+            self._turn_timer.stop()
+            self._turn_timer_state = None
+            self.ui_timer.stop()
+        remaining = self._turn_timer.remaining_ms()
+        if self._turn_countdown_bar is not None:
+            self._turn_countdown_bar.setRange(0, self._turn_timer.base_seconds)
+            self._turn_countdown_bar.setValue((remaining + 999) // 1000)
+            self._turn_countdown_bar.setFormat(f"{human.name} 回合：{(remaining + 999) // 1000} 秒")
+
+    def _on_ui_timer_tick(self) -> None:
+        """Advance the human-turn countdown and resolve a timeout once."""
+        if self.game is None or not self._is_human_turn() or self.game.is_won():
+            self.ui_timer.stop()
+            return
+        self._turn_timer.tick(self.ui_timer.interval())
+        self._render_turn_timer()
+        if self._turn_timer.passed() and self._auto_run_allowed():
+            self.ui_timer.stop()
+            QTimer.singleShot(0, self._auto_complete_human_turn)
+
+    def _auto_complete_human_turn(self) -> None:
+        """Finish an expired human turn, declining any resulting purchase offer."""
+        if not self._auto_run_allowed() or not self._is_human_turn():
+            return
+        self._act_current()
+        if self.game.pending_purchase is not None:
+            self.game.decline_pending_asset(self.game.players[self.human_index])
+        self._after_step()
+        if self._auto_run_allowed():
+            QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
+
+    def _on_win_flash(self) -> None:
+        if self.game is None or not self.game.is_won():
+            return
+        self._win_flash = (self._win_flash % 16) + 1
+        self._render_win_animation()
+
+    def _render_win_animation(self) -> None:
+        """Apply the current win pulse to the board highlight cells."""
+        self.board_view._win_cells = [
+            (tile_index, 0.16 + 0.03 * (self._win_flash % 8))
+            for tile_index in self._win_cells
+        ]
+        self.board_view._win_flash = self._win_flash
+        self.board_view.update()
+
+    def _check_win_condition(self) -> None:
+        """Animate + highlight winning tiles across the board once game ends."""
+        if self.game is None:
+            return
+        if not self.game.is_won():
+            self.board_view._win_cells = []
+            self.board_view._win_flash = 0
+            if self._win_anim is not None:
+                self._win_anim.stop()
+            return
+        if self._win_flash == 0:
+            self._win_cells = [
+                self.game.players[w].position for w in range(len(self.game.players))
+            ]
+            self._win_flash = 1
+            self._render_win_animation()
+            if self._win_anim is None:
+                self._win_anim = QTimer(self)
+                self._win_anim.setInterval(150)
+                self._win_anim.timeout.connect(self._on_win_flash)
+            self._win_anim.start()
+
+    def _check_card_prompt(self) -> None:
+        """Show the human's upcoming CHANCE/COMMUNITY card as a modal."""
+        if self.game is None:
+            return
+        human = self.game.players[self.human_index]
+        idx = card_event_index(self.game.log, human.name, self._card_render_marker + 1)
+        if idx == -1:
+            return
+        phase, text = card_event_display(self.game.log[idx], human.name)
+        kind = CARD_KIND.get(phase, phase)
+        icon = CARD_ICON.get(phase, "🎁")
+        msg = QMessageBox(self)
+        msg.setWindowTitle(f"{icon} {kind}")
+        msg.setIcon(QMessageBox.Information)
+        msg.setText(f"{icon} {text}")
+        execBtn = QPushButton("确定"); msg.addButton(execBtn, QMessageBox.AcceptRole)
+        msg.exec()
+        self._card_render_marker = idx
 
     def _update_status(self) -> None:
         if self.game is None:
