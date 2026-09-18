@@ -65,3 +65,4 @@ def test_clean_prompt_text_strips_name():
 
 def test_card_kind_mapping():
     assert CARD_KIND == {"机会": "chance", "社区": "community"}
+
