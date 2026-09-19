@@ -193,17 +193,7 @@ class Game:
 
     def _land_property(self, player: Player, t: object) -> None:
         if t.owner is None:
-            if not self.auto_buy:
-                if player.is_bot:
-                    if self._should_bot_buy(player, t):
-                        self._buy_asset(player, t)
-                    return
-                if player.can_pay(t.price):
-                    self.pending_purchase = (player, t)
-                    self.add_log("buy", f"{player.name} 可购买 {t.name}（¥{t.price}）")
-                return
-            if self._should_bot_buy(player, t):
-                self._buy_asset(player, t)
+            self._offer_asset_purchase(player, t)
             return
         if t.owner == player.name:
             # 自己的地：拥有整个集团且房屋未满时可继续盖房
@@ -233,7 +223,8 @@ class Game:
         if player.can_pay(cost) and player.money - cost >= 3000:
             player.pay(cost)
             t.house += 1
-            self.add_log("build", f"{player.name} 为 {t.name} 建房子（-{cost}）")
+            level = "酒店" if t.house == 4 else f"{t.house} 级房屋"
+            self.add_log("build", f"{player.name} 为 {t.name} 建成 {level}（-¥{cost}）")
 
     def _pay_rent(self, player: Player, t: object) -> None:
         base = t.price // 20
@@ -241,7 +232,8 @@ class Game:
         self._collect_rent(player, t.owner, rent)
 
     def _land_railroad(self, player: Player, t: object) -> None:
-        if self._buy_asset(player, t):
+        if t.owner is None:
+            self._offer_asset_purchase(player, t)
             return
         if t.owner != player.name:
             owned_railroads = sum(
@@ -251,7 +243,8 @@ class Game:
             self._collect_rent(player, t.owner, 200 * owned_railroads)
 
     def _land_utility(self, player: Player, t: object) -> None:
-        if self._buy_asset(player, t):
+        if t.owner is None:
+            self._offer_asset_purchase(player, t)
             return
         if t.owner != player.name:
             owned_utilities = sum(
@@ -260,6 +253,16 @@ class Game:
             )
             multiplier = 100 if owned_utilities == 2 else 40
             self._collect_rent(player, t.owner, multiplier * sum(self._last_roll))
+
+    def _offer_asset_purchase(self, player: Player, t: object) -> None:
+        """Offer an unowned property, railroad, or utility to its lander."""
+        if self.auto_buy or player.is_bot:
+            if self._should_bot_buy(player, t):
+                self._buy_asset(player, t)
+            return
+        if player.can_pay(t.price):
+            self.pending_purchase = (player, t)
+            self.add_log("buy", f"{player.name} 可购买 {t.name}（¥{t.price}）")
 
     def _buy_asset(self, player: Player, t: object) -> bool:
         """Purchase an unowned tile; returns True only when it succeeds."""
@@ -456,8 +459,14 @@ class Game:
 
     def _check_bankrupt(self) -> None:
         for pl in self.players:
-            if pl.money == 0 and pl.bank == 0 and pl.wallets:
+            if not pl.bankrupt and pl.money == 0 and pl.bank == 0 and pl.wallets:
                 pl.bankrupt = True
+                for property_id in pl.properties:
+                    tile = self.board.tiles[property_id]
+                    tile.owner = None
+                    tile.house = 0
+                pl.properties.clear()
+                self.add_log("破产", f"{pl.name} 破产，名下地产已由银行回收")
 
     def _detect_winner(self) -> None:
         if self.winner is not None:

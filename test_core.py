@@ -87,6 +87,31 @@ def test_bankrupt_player_drops_out():
     assert alive == ["BOT2"]
     assert g.winner is not None and g.winner.name == "BOT2"
 
+def test_bankrupt_players_properties_return_to_bank_for_resale():
+    g = make_game(n=2)
+    owner, buyer = g.players
+    owner.set_money(100000)
+    owner.position = 6
+    g._land(owner)
+    tile = g.board.tiles[6]
+    tile.house = 2
+
+    owner.set_money(0)
+    g._check_bankrupt()
+
+    assert owner.bankrupt
+    assert owner.properties == []
+    assert tile.owner is None
+    assert tile.house == 0
+
+    g.auto_buy = False
+    buyer.set_money(100000)
+    buyer.position = tile.tile
+    g._land(buyer)
+
+    assert g.pending_purchase == (buyer, tile)
+    assert g.buy_pending_asset(buyer)
+    assert tile.owner == buyer.name
 
 def test_buy_property_when_wealthy():
     # seed=5 -> deterministic; force wealthy, then run a little and check a buy
@@ -347,6 +372,22 @@ def test_rent_scales_with_houses():
     base = g.board.tiles[6].price // 20  # 75
     expected = base * (1 + 2 * 1)        # 225
     assert visitor.money == 100000 - expected
+
+
+def test_railroad_and_utility_require_human_purchase_confirmation():
+    g = make_game(n=1)
+    g.auto_buy = False
+    player = g.players[0]
+    player.set_money(100000)
+
+    for tile_index in (5, 12):
+        tile = g.board.tiles[tile_index]
+        player.position = tile_index
+        g._land(player)
+        assert g.pending_purchase == (player, tile)
+        assert tile.owner is None
+        assert g.buy_pending_asset(player)
+        assert tile.owner == player.name
 
 
 def test_player_initial_money_recorded_and_serialised():

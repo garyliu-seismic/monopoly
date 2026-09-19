@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTextBrowser, QPushButton, QLabel, QFrame,
     QDialog, QProgressBar, QComboBox, QSpinBox, QFileDialog, QMessageBox, QToolTip,
+    QScrollArea, QSizePolicy,
 )
 from PySide6.QtCore import (
     Qt, QPoint, QSize, QRect, QTimer, QObject, QPropertyAnimation, QAbstractAnimation,
@@ -63,7 +64,8 @@ class BoardView(QWidget):
     def __init__(self, board: Board, parent=None):
         super().__init__(parent)
         self.board = board
-        self.setMinimumSize(720, 600)
+        self.setMinimumSize(360, 360)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
         self.setStyleSheet("background: #f4f7f2; border: 1px solid #cad6cc;")
         self._animation_queue = []
@@ -127,7 +129,7 @@ class BoardView(QWidget):
         super().mouseMoveEvent(event)
 
     def sizeHint(self) -> QSize:
-        return QSize(960, 760)
+        return QSize(640, 640)
 
     def set_game(self, game):
         """Store a game reference so a player token can be drawn per tile."""
@@ -568,6 +570,7 @@ class BankPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         title = QLabel("🏦 银行（存款 5%/圈 · 贷款 10%/圈，逾期 20%）")
+        title.setWordWrap(True)
         title.setStyleSheet("font-weight: bold; font-size: 12px; color: #176d5b;")
         layout.addWidget(title)
         self.balance_label = QLabel("存款 ¥0 · 贷款 ¥0 · 现金 ¥0")
@@ -744,7 +747,7 @@ class MainWindow(QMainWindow):
         box.setContentsMargins(16, 16, 16, 16)
         box.setSpacing(12)
 
-        left = QFrame(); left.setMaximumWidth(250)
+        left = QFrame()
         left.setFrameShape(QFrame.StyledPanel)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(10, 10, 10, 10)
@@ -757,17 +760,28 @@ class MainWindow(QMainWindow):
         self.stock_panel.on_trade = self._after_trade
         left_layout.addWidget(self.stock_panel)
         left_layout.addStretch()
-        box.addWidget(left)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left)
+        left_scroll.setMinimumWidth(190)
+        left_scroll.setMaximumWidth(250)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        box.addWidget(left_scroll)
 
         self.board_view = BoardView(Board())
         box.addWidget(self.board_view, 3)
 
-        controls = QFrame(); controls.setMaximumWidth(280)
+        controls = QFrame()
         controls.setFrameShape(QFrame.StyledPanel)
         cb = QVBoxLayout(controls)
         title = QLabel("回合控制")
         title.setStyleSheet("font-size: 16px; font-weight: bold; color: #176d5b;")
         cb.addWidget(title)
+        self.map_combo = QComboBox()
+        for key in available_maps():
+            board_map = by_key(key)
+            self.map_combo.addItem(board_map.name, key)
+        cb.addWidget(self.map_combo)
         self.status = QLabel("状态：等待新局")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("background: #e1eee5; padding: 8px; border-radius: 4px;")
@@ -806,7 +820,13 @@ class MainWindow(QMainWindow):
         self.log_pane.setMinimumHeight(190)
         cb.addWidget(self.log_pane, 1)
         cb.addStretch()
-        box.addWidget(controls)
+        controls_scroll = QScrollArea()
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setWidget(controls)
+        controls_scroll.setMinimumWidth(230)
+        controls_scroll.setMaximumWidth(280)
+        controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        box.addWidget(controls_scroll)
 
     def new_game(self):
         names = ["玩家1", "玩家2", "玩家3", "玩家4"]
@@ -815,7 +835,8 @@ class MainWindow(QMainWindow):
         for i in range(1, len(players)):
             players[i].is_bot = True
         self.human_index = 0
-        self.game = game_engine.Game(players, seed=1, auto_buy=False)
+        board = build_map(by_key(self.map_combo.currentData()))
+        self.game = game_engine.Game(players, board=board, seed=1, auto_buy=False)
         self.game.start()
         self._played_log_count = 0
         self._turn_timer.reset()
@@ -832,7 +853,7 @@ class MainWindow(QMainWindow):
         self.board_view.set_game(self.game)
         self.log_pane.game = self.game
         self.log_pane.refresh()
-        self.status.setText(f"游戏开始 · {len(players)} 名玩家")
+        self.status.setText(f"游戏开始 · {self.map_combo.currentText()} · {len(players)} 名玩家")
         self._refresh_purchase_controls()
         self._render_turn_timer()
         self._refresh_token_highlight()
@@ -1157,6 +1178,13 @@ class MainWindow(QMainWindow):
             and self.game.pending_purchase is not None
             and self.game.pending_purchase[0] is self.game.players[self.human_index]
         )
+        if pending_for_human:
+            _, tile = self.game.pending_purchase
+            self.buy_button.setText(f"购买 {tile.name} · ¥{tile.price}")
+            self.skip_buy_button.setText(f"放弃购买 {tile.name}")
+        else:
+            self.buy_button.setText("购买当前地产")
+            self.skip_buy_button.setText("暂不购买")
         self.buy_button.setEnabled(pending_for_human)
         self.skip_buy_button.setEnabled(pending_for_human)
 
