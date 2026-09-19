@@ -18,12 +18,12 @@ from typing import Callable, List, Optional, Iterable
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QTextBrowser, QPushButton, QLabel, QFrame,
-    QDialog, QProgressBar, QComboBox, QSpinBox, QFileDialog, QMessageBox,
+    QDialog, QProgressBar, QComboBox, QSpinBox, QFileDialog, QMessageBox, QToolTip,
 )
 from PySide6.QtCore import (
     Qt, QPoint, QSize, QRect, QTimer, QObject, QPropertyAnimation, QAbstractAnimation,
 )
-from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen, QCursor
+from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen, QCursor, QPolygon
 
 from game import game as game_engine
 from game.player import Player
@@ -64,6 +64,7 @@ class BoardView(QWidget):
         super().__init__(parent)
         self.board = board
         self.setMinimumSize(720, 600)
+        self.setMouseTracking(True)
         self.setStyleSheet("background: #f4f7f2; border: 1px solid #cad6cc;")
         self._animation_queue = []
         self._active_animation = None
@@ -84,17 +85,105 @@ class BoardView(QWidget):
         # Board always exposes ``grid`` (tile index -> (row, col)).
         return self.board.grid
 
+    def _tile_at(self, point: QPoint):
+        """Return the board tile rendered at ``point``, if any."""
+        grid = self._grid()
+        cols = max((c for _, c in grid.values() if isinstance(c, int)), default=0)
+        rows = max((r for r, _ in grid.values() if isinstance(r, int)), default=0)
+        cell = min(self.width() / (cols + 1), self.height() / (rows + 1))
+        ox = (self.width() - (cols + 1) * cell) / 2
+        oy = (self.height() - (rows + 1) * cell) / 2
+        for tile in self.board.tiles:
+            row, column = grid.get(tile.tile, (0, 0))
+            if not isinstance(row, int) or not isinstance(column, int):
+                row, column = 0, tile.tile % 3
+            rect = QRect(
+                int(ox + column * cell),
+                int(oy + row * cell),
+                int(cell),
+                int(cell),
+            )
+            if rect.contains(point):
+                return tile
+        return None
+
+    @staticmethod
+    def _house_tooltip(tile) -> str:
+        level = "酒店" if tile.house >= 4 else f"{tile.house} 级房屋"
+        rent = tile.price // 20 * (1 + 2 * tile.house)
+        return f"{tile.name}\n{level}\n当前租金: ¥{rent:,}"
+
+    def mouseMoveEvent(self, event) -> None:
+        tile = self._tile_at(event.position().toPoint())
+        if tile is None or tile.house <= 0:
+            QToolTip.hideText()
+            return super().mouseMoveEvent(event)
+
+        QToolTip.showText(
+            event.globalPosition().toPoint(),
+            self._house_tooltip(tile),
+            self,
+        )
+        super().mouseMoveEvent(event)
+
     def sizeHint(self) -> QSize:
         return QSize(960, 760)
 
     def set_game(self, game):
         """Store a game reference so a player token can be drawn per tile."""
         self.board_game = game
+        self.board = game.board
         self._animation_queue.clear()
         self._active_animation = None
         self._display_positions.clear()
         self._move_timer.stop()
         self.update()
+
+    @staticmethod
+    def _draw_building(qp, band: QRect, level: int) -> None:
+        """Draw houses for levels 1-3 and a hotel for the maximum level."""
+        if level >= 4:
+            hotel = QRect(
+                band.left() + band.width() // 5,
+                band.top() + band.height() // 5,
+                band.width() * 3 // 5,
+                band.height() * 3 // 5,
+            )
+            qp.setPen(QPen(QColor("#8f2f22"), 1))
+            qp.setBrush(QColor("#e76f51"))
+            qp.drawRect(hotel)
+            qp.setBrush(QColor("#fff3d1"))
+            window_size = max(2, hotel.width() // 6)
+            for row in range(2):
+                for column in range(3):
+                    qp.drawRect(
+                        hotel.left() + hotel.width() * (column + 1) // 4 - window_size // 2,
+                        hotel.top() + hotel.height() * (row + 1) // 3 - window_size // 2,
+                        window_size,
+                        window_size,
+                    )
+            return
+
+        count = max(1, min(level, 3))
+        width = max(6, band.width() // (count * 2))
+        height = max(7, band.height() * 3 // 5)
+        gap = max(2, (band.width() - count * width) // (count + 1))
+        for index in range(count):
+            left = band.left() + gap * (index + 1) + width * index
+            top = band.bottom() - height
+            body = QRect(left, top + height // 3, width, height * 2 // 3)
+            qp.setPen(QPen(QColor("#1e6b4a"), 1))
+            qp.setBrush(QColor("#68b984"))
+            qp.drawRect(body)
+            qp.setBrush(QColor("#f9e6a1"))
+            qp.drawPolygon(QPolygon([
+                QPoint(left - 1, top + height // 3),
+                QPoint(left + width // 2, top),
+                QPoint(left + width + 1, top + height // 3),
+            ]))
+            window_size = max(2, width // 4)
+            qp.setBrush(QColor("#d9f0ff"))
+            qp.drawRect(left + width // 2 - window_size // 2, top + height // 2, window_size, window_size)
 
     def animate_move(self, player_index: int, before: int, after: int) -> None:
         """Show a token walking each board space while game state resolves immediately."""
@@ -155,21 +244,27 @@ class BoardView(QWidget):
             qp.fillRect(rect, QColor(_CATEGORY_COLORS.get(tile.category.name, "#ffffff")))
             qp.setPen(QColor("#9aaba0"))
             qp.drawRect(rect)
+            if tile.category == TileType.PROPERTY:
+                if tile.owner:
+                    owner_index = next(
+                        (
+                            index for index, player in enumerate(board_game.players)
+                            if player.name == tile.owner
+                        ),
+                        0,
+                    ) if board_game is not None else 0
+                    qp.setPen(QPen(
+                        QColor(PLAYER_COLORS[owner_index % len(PLAYER_COLORS)]),
+                        max(3, int(cell * 0.04)),
+                    ))
+                else:
+                    qp.setPen(QPen(QColor("#d99700"), 2, Qt.DashLine))
+                qp.drawRect(rect.adjusted(2, 2, -2, -2))
             if tile.group:
                 qp.fillRect(rect.adjusted(3, 3, -3, -int(cell * 0.76)), QColor(_GROUP_COLORS.get(tile.group, "#888888")))
             if tile.house:
                 band = rect.adjusted(3, 3, -3, -int(cell * 0.76))
-                n = min(tile.house, 4)
-                bw = band.width() / 5
-                qp.setPen(Qt.NoPen)
-                qp.setBrush(QColor("#ffffff"))
-                for k in range(n):
-                    qp.drawRect(
-                        band.left() + int(bw * (k + 1)) - int(bw * 0.35),
-                        band.top() + int(band.height() * 0.22),
-                        int(bw * 0.7),
-                        int(band.height() * 0.56),
-                    )
+                self._draw_building(qp, band, tile.house)
             if tile.tile == active_position:
                 qp.setPen(QColor("#147d68"))
                 qp.drawRect(rect.adjusted(2, 2, -2, -2))
@@ -180,7 +275,9 @@ class BoardView(QWidget):
             qp.setFont(QFont("Segoe UI", max(7, size - 2)))
             details = f"¥{tile.price}" if tile.price else tile.category.self_name
             if tile.owner:
-                details = f"{tile.owner} · {details}"
+                details = f"已购 · {tile.owner}"
+            elif tile.category == TileType.PROPERTY:
+                details = f"待购 · {details}"
             qp.setPen(QColor("#516158"))
             qp.drawText(rect.adjusted(4, int(cell * 0.42), -4, -4), Qt.AlignCenter | Qt.TextWordWrap, details)
 
@@ -275,6 +372,7 @@ class DiceView(QWidget):
     @staticmethod
     def _pip_layout(v):
         return {
+            0: [],
             1: [(0.5, 0.5)],
             2: [(0.28, 0.28), (0.72, 0.72)],
             3: [(0.28, 0.28), (0.5, 0.5), (0.72, 0.72)],
