@@ -916,18 +916,71 @@ class MainWindow(QMainWindow):
         self.bank_panel = BankPanel()
         self.bank_panel.on_bank = self._after_bank
         cb.addWidget(self.bank_panel)
-        b1 = QPushButton("开始新游戏"); b1.clicked.connect(self.new_game); cb.addWidget(b1)
-        b2 = QPushButton("掷骰并行动"); b2.clicked.connect(self.step); cb.addWidget(b2)
-        self.buy_button = QPushButton("购买当前地产")
+        # --- 开始新游戏（次要按钮，放顶部，远离主操作区）---
+        b1 = QPushButton("⚑  开始新游戏")
+        b1.clicked.connect(self.new_game)
+        b1.setStyleSheet(
+            "QPushButton { background: #e1eee5; color: #2d6a4f; border: 1px solid #95c8a8;"
+            " border-radius: 5px; padding: 6px 10px; font-weight: bold; font-size: 12px; }"
+            "QPushButton:hover { background: #c8e6d4; }"
+        )
+        cb.addWidget(b1)
+
+        # --- 分隔线 ---
+        sep1 = QFrame(); sep1.setFrameShape(QFrame.HLine)
+        sep1.setStyleSheet("color: #b4c7b8; margin: 4px 0;")
+        cb.addWidget(sep1)
+
+        # --- 主行动按钮：掷骰（大、醒目）---
+        b2 = QPushButton("🎲  掷骰并行动")
+        b2.clicked.connect(self.step)
+        b2.setMinimumHeight(52)
+        b2.setStyleSheet(
+            "QPushButton { background: #1b6e45; color: white; border: 0;"
+            " border-radius: 8px; padding: 10px; font-weight: bold; font-size: 15px; }"
+            "QPushButton:hover { background: #145236; }"
+            "QPushButton:disabled { background: #a8bbb0; color: #e0e0e0; }"
+        )
+        cb.addWidget(b2)
+        self.step_button = b2
+
+        # --- 购买地产（横排，情境按钮）---
+        buy_row = QHBoxLayout()
+        self.buy_button = QPushButton("✔  购买")
         self.buy_button.clicked.connect(self.buy_pending_asset)
         self.buy_button.setEnabled(False)
-        cb.addWidget(self.buy_button)
-        self.skip_buy_button = QPushButton("暂不购买")
+        self.buy_button.setStyleSheet(
+            "QPushButton { background: #d4edda; color: #155724; border: 1px solid #95c8a8;"
+            " border-radius: 5px; padding: 7px; font-weight: bold; }"
+            "QPushButton:hover { background: #b8dfc6; }"
+            "QPushButton:disabled { background: #e9ecef; color: #999; border-color: #ced4da; }"
+        )
+        self.skip_buy_button = QPushButton("✖  略过")
         self.skip_buy_button.clicked.connect(self.decline_pending_asset)
         self.skip_buy_button.setEnabled(False)
-        cb.addWidget(self.skip_buy_button)
-        self.mortgage_button = QPushButton("管理地产（盖房 / 抵押）")
+        self.skip_buy_button.setStyleSheet(
+            "QPushButton { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;"
+            " border-radius: 5px; padding: 7px; font-weight: bold; }"
+            "QPushButton:hover { background: #f1b0b7; }"
+            "QPushButton:disabled { background: #e9ecef; color: #999; border-color: #ced4da; }"
+        )
+        buy_row.addWidget(self.buy_button)
+        buy_row.addWidget(self.skip_buy_button)
+        cb.addLayout(buy_row)
+
+        # --- 分隔线 ---
+        sep2 = QFrame(); sep2.setFrameShape(QFrame.HLine)
+        sep2.setStyleSheet("color: #b4c7b8; margin: 4px 0;")
+        cb.addWidget(sep2)
+
+        # --- 次要操作组 ---
+        self.mortgage_button = QPushButton("🏠  管理地产（盖房 / 抵押）")
         self.mortgage_button.clicked.connect(self.open_mortgage_dialog)
+        self.mortgage_button.setStyleSheet(
+            "QPushButton { background: #fff3cd; color: #856404; border: 1px solid #ffc107;"
+            " border-radius: 5px; padding: 7px; font-weight: bold; }"
+            "QPushButton:hover { background: #ffe69c; }"
+        )
         cb.addWidget(self.mortgage_button)
         b3 = QPushButton("结束回合并运行 AI"); b3.clicked.connect(self.run_bots); cb.addWidget(b3)
         b4 = QPushButton("模拟 30 回合"); b4.clicked.connect(lambda: self.run_bots(limit=30)); cb.addWidget(b4)
