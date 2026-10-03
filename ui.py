@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import (
     Qt, QPoint, QSize, QRect, QTimer, QObject, QPropertyAnimation, QAbstractAnimation,
 )
-from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen, QCursor, QPolygon
+from PySide6.QtGui import QColor, QPainter, QFont, QAction, QPen, QCursor, QPolygon, QLinearGradient
 
 from game import game as game_engine
 from game.player import Player
@@ -52,6 +52,15 @@ _GROUP_COLORS = {
     "orange": "#ffb300", "red": "#e53935", "yellow": "#fdd835",
     "green": "#43a047", "darkblue": "#1e3a8a",
 }
+# category -> (fill, accent, emoji) for non-property tiles
+_TILE_STYLE = {
+    "GO": ("#d8f3dc", "#2d9d4f", "🏁"), "CHANCE": ("#ffe8c7", "#f08c00", "❓"),
+    "COMMUNITY": ("#ffd9e4", "#d6336c", "🎁"), "TAX": ("#ffe0d6", "#e8590c", "💰"),
+    "RAILROAD": ("#e8e2dc", "#5c4a3d", "🚉"), "UTILITY": ("#d6ecff", "#1c7ed6", "💡"),
+    "JAIL": ("#e3e7ea", "#495057", "🔒"), "FREE": ("#e6f7d4", "#5c940d", "🅿️"),
+    "GANBANG": ("#e5dbff", "#6741d9", "🦹"), "PRISON": ("#e3e7ea", "#495057", "🔒"),
+    "GO_JAIL": ("#ffd6d6", "#c92a2a", "🚓"), "SPECIAL": ("#fff3bf", "#e67700", "⭐"),
+}
 PLAYER_COLORS = ["#e53935", "#1e88e5", "#43a047", "#8e24aa"]
 PLAYER_AVATARS = ["🧑", "🤖", "👽", "👻"]
 
@@ -67,13 +76,14 @@ class BoardView(QWidget):
         self.setMinimumSize(360, 360)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMouseTracking(True)
-        self.setStyleSheet("background: #f4f7f2; border: 1px solid #cad6cc;")
+        self.setStyleSheet("background: #12372a; border: 0;")
         self._animation_queue = []
         self._active_animation = None
         self._display_positions = {}
         self._active_player_index = -1
         self._win_cells: List[QPoint] = []
         self._win_flash = 0
+        self._hover_tile = None
         self._move_timer = QTimer(self)
         self._move_timer.setInterval(115)
         self._move_timer.timeout.connect(self._advance_animation)
@@ -117,16 +127,89 @@ class BoardView(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         tile = self._tile_at(event.position().toPoint())
-        if tile is None or tile.house <= 0:
-            QToolTip.hideText()
-            return super().mouseMoveEvent(event)
-
-        QToolTip.showText(
-            event.globalPosition().toPoint(),
-            self._house_tooltip(tile),
-            self,
-        )
+        if tile is not self._hover_tile:
+            self._hover_tile = tile
+            self.update()
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._hover_tile is not None:
+            self._hover_tile = None
+            self.update()
+        super().leaveEvent(event)
+
+    @staticmethod
+    def _rent_ladder(tile) -> List[tuple]:
+        """(label, rent) rows for a property: land, 1-3 houses, hotel."""
+        labels = ["地皮", "1 级房屋", "2 级房屋", "3 级房屋", "酒店"]
+        return [
+            (labels[level], game_engine.Game.property_rent(
+                type("T", (), {"price": tile.price, "house": level})()))
+            for level in range(5)
+        ]
+
+    def _draw_detail_card(self, qp: QPainter, center: QRect, tile, cell: float) -> None:
+        """Draw a property detail card (header, price, rent ladder) in the board centre."""
+        card_w = min(center.width() - 24, int(cell * 3.2))
+        card_h = min(center.height() - 24, int(cell * 3.4))
+        card = QRect(
+            center.center().x() - card_w // 2,
+            center.center().y() - card_h // 2,
+            card_w, card_h,
+        )
+        qp.setPen(QPen(QColor("#c5d2c8"), 1))
+        qp.setBrush(QColor("#ffffff"))
+        qp.drawRoundedRect(card, 8, 8)
+
+        header_h = max(28, int(card_h * 0.17))
+        header = QRect(card.left(), card.top(), card.width(), header_h)
+        header_color = QColor(_GROUP_COLORS.get(tile.group, "#176d5b"))
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(header_color)
+        qp.drawRoundedRect(header.adjusted(0, 0, 0, 8), 8, 8)
+        qp.drawRect(header.adjusted(0, header_h - 8, 0, 0))
+        light_header = header_color.lightness() > 150
+        qp.setPen(QColor("#1e3027") if light_header else QColor("#ffffff"))
+        title_size = max(10, min(int(cell * 0.17), header_h // 2))
+        qp.setFont(QFont("Microsoft JhengHei", title_size, QFont.Bold))
+        qp.drawText(header.adjusted(6, 0, -6, 0), Qt.AlignCenter | Qt.TextWordWrap, tile.name)
+
+        body = card.adjusted(14, header_h + 8, -14, -8)
+        text_size = max(8, int(cell * 0.11))
+        qp.setFont(QFont("Segoe UI", text_size))
+        row_h = max(text_size + 8, int(text_size * 2.1))
+
+        def row(y: int, left: str, right: str, bold: bool = False, color: str = "#23362b") -> None:
+            font = QFont("Microsoft JhengHei", text_size)
+            font.setBold(bold)
+            qp.setFont(font)
+            qp.setPen(QColor(color))
+            r = QRect(body.left(), y, body.width(), row_h)
+            qp.drawText(r, Qt.AlignLeft | Qt.AlignVCenter, left)
+            qp.drawText(r, Qt.AlignRight | Qt.AlignVCenter, right)
+
+        y = body.top()
+        owner = tile.owner or "无人"
+        row(y, "类型", tile.category.self_name, color="#516158"); y += row_h
+        if tile.price:
+            row(y, "价格", f"¥{tile.price:,}", bold=True); y += row_h
+        row(y, "所有者", owner, color="#516158" if tile.owner else "#d99700"); y += row_h
+
+        if tile.category == TileType.PROPERTY and tile.price:
+            qp.setPen(QColor("#d5e0d6"))
+            qp.drawLine(body.left(), y + 2, body.right(), y + 2)
+            y += 6
+            for level, (label, rent) in enumerate(self._rent_ladder(tile)):
+                current = level == min(tile.house, 4)
+                if current:
+                    qp.fillRect(QRect(body.left() - 6, y, body.width() + 12, row_h), QColor("#e4f2ec"))
+                row(y, label, f"¥{rent:,}", bold=current, color="#176d5b" if current else "#23362b")
+                y += row_h
+            row(y, "建造费用", f"¥{tile.price // 2:,} / 级", color="#516158")
+        elif tile.category == TileType.RAILROAD:
+            row(y, "租金", "¥200 × 持有数量", color="#516158")
+        elif tile.category == TileType.UTILITY:
+            row(y, "租金", "按持有数量结算", color="#516158")
 
     def sizeHint(self) -> QSize:
         return QSize(640, 640)
@@ -237,66 +320,98 @@ class BoardView(QWidget):
         active_position = None
         if board_game is not None and board_game.players:
             active_position = board_game._current_player().position
+        # board frame + soft felt backdrop
+        frame = QRect(int(ox) - 6, int(oy) - 6, int(grid_w) + 12, int(grid_h) + 12)
+        felt = QLinearGradient(frame.topLeft(), frame.bottomRight())
+        felt.setColorAt(0, QColor("#1c5a43"))
+        felt.setColorAt(1, QColor("#0e2f23"))
+        qp.setPen(Qt.NoPen)
+        qp.setBrush(felt)
+        qp.drawRoundedRect(frame, 14, 14)
+        owners = {pl.name: i for i, pl in enumerate(board_game.players)} if board_game is not None else {}
         for tile in self.board.tiles:
             r, c = grid.get(tile.tile, (0, 0))
             if not isinstance(r, int) or not isinstance(c, int):
                 r, c = 0, tile.tile % 3
             x, y = pos(c, r)
-            rect = QRect(int(x), int(y), int(cell), int(cell))
-            qp.fillRect(rect, QColor(_CATEGORY_COLORS.get(tile.category.name, "#ffffff")))
-            qp.setPen(QColor("#9aaba0"))
-            qp.drawRect(rect)
-            if tile.category == TileType.PROPERTY:
-                if tile.owner:
-                    owner_index = next(
-                        (
-                            index for index, player in enumerate(board_game.players)
-                            if player.name == tile.owner
-                        ),
-                        0,
-                    ) if board_game is not None else 0
-                    qp.setPen(QPen(
-                        QColor(PLAYER_COLORS[owner_index % len(PLAYER_COLORS)]),
-                        max(3, int(cell * 0.04)),
-                    ))
-                else:
-                    qp.setPen(QPen(QColor("#d99700"), 2, Qt.DashLine))
-                qp.drawRect(rect.adjusted(2, 2, -2, -2))
-            if tile.group:
-                qp.fillRect(rect.adjusted(3, 3, -3, -int(cell * 0.76)), QColor(_GROUP_COLORS.get(tile.group, "#888888")))
-            if tile.house:
-                band = rect.adjusted(3, 3, -3, -int(cell * 0.76))
-                self._draw_building(qp, band, tile.house)
-            if tile.tile == active_position:
-                qp.setPen(QColor("#147d68"))
-                qp.drawRect(rect.adjusted(2, 2, -2, -2))
+            rect = QRect(int(x), int(y), int(cell), int(cell)).adjusted(2, 2, -2, -2)
+            is_property = tile.category == TileType.PROPERTY
+            fill, accent, icon = _TILE_STYLE.get(tile.category.name, ("#ffffff", "#516158", ""))
+            qp.setPen(QPen(QColor("#00000030"), 1))
+            qp.setBrush(QColor("#fffdf6") if is_property else QColor(fill))
+            qp.drawRoundedRect(rect, 7, 7)
             size = max(8, int(cell * 0.105))
+            band_h = int(cell * 0.24)
+            if is_property:
+                band = QRect(rect.left(), rect.top(), rect.width(), band_h)
+                color = QColor(_GROUP_COLORS.get(tile.group, "#888888"))
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(color)
+                qp.drawRoundedRect(band.adjusted(0, 0, 0, 7), 7, 7)
+                qp.drawRect(band.adjusted(0, band_h - 7, 0, 0))
+                if tile.house:
+                    self._draw_building(qp, band.adjusted(3, 3, -3, -3), tile.house)
+                text_top = rect.top() + band_h + 5
+            else:
+                qp.setFont(QFont("Segoe UI Emoji", max(9, int(cell * 0.20))))
+                qp.setPen(QColor(accent))
+                qp.drawText(rect.adjusted(0, int(cell * 0.04), 0, 0),
+                            Qt.AlignHCenter | Qt.AlignTop, icon)
+                text_top = rect.top() + int(cell * 0.46)
             qp.setFont(QFont("Microsoft JhengHei", size, QFont.Bold))
-            qp.setPen(QColor("#1e3027"))
-            qp.drawText(rect.adjusted(4, int(cell * 0.04), -4, -int(cell * 0.36)), Qt.AlignCenter | Qt.TextWordWrap, tile.name)
-            qp.setFont(QFont("Segoe UI", max(7, size - 2)))
-            details = f"¥{tile.price}" if tile.price else tile.category.self_name
-            if tile.owner:
-                details = f"已购 · {tile.owner}"
-            elif tile.category == TileType.PROPERTY:
-                details = f"待购 · {details}"
-            qp.setPen(QColor("#516158"))
-            qp.drawText(rect.adjusted(4, int(cell * 0.42), -4, -4), Qt.AlignCenter | Qt.TextWordWrap, details)
+            qp.setPen(QColor("#1e3027") if is_property else QColor(accent).darker(140))
+            qp.drawText(
+                QRect(rect.left() + 3, text_top, rect.width() - 6, int(cell * 0.30)),
+                Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, tile.name,
+            )
+            if tile.price and tile.category in (TileType.PROPERTY, TileType.RAILROAD, TileType.UTILITY, TileType.TAX):
+                foot = QRect(rect.left() + 3, rect.bottom() - int(cell * 0.24), rect.width() - 6, int(cell * 0.22))
+                if tile.owner:
+                    owner_color = QColor(PLAYER_COLORS[owners.get(tile.owner, 0) % len(PLAYER_COLORS)])
+                    qp.setPen(Qt.NoPen)
+                    qp.setBrush(owner_color)
+                    qp.drawRoundedRect(foot, 5, 5)
+                    qp.setPen(QColor("#ffffff"))
+                    label = tile.owner
+                else:
+                    qp.setPen(QColor("#516158"))
+                    label = f"¥{tile.price:,}"
+                qp.setFont(QFont("Segoe UI", max(7, size - 1), QFont.Bold))
+                qp.drawText(foot, Qt.AlignCenter, label)
+            if tile.mortgaged:
+                qp.setPen(Qt.NoPen)
+                qp.setBrush(QColor(60, 60, 60, 150))
+                qp.drawRoundedRect(rect, 7, 7)
+                qp.setPen(QColor("#ffffff"))
+                qp.setFont(QFont("Microsoft JhengHei", max(9, size), QFont.Bold))
+                qp.drawText(rect, Qt.AlignCenter, "已抵押")
+            if tile.tile == active_position:
+                qp.setBrush(Qt.NoBrush)
+                qp.setPen(QPen(QColor("#ffd43b"), 3))
+                qp.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 7, 7)
 
         center = QRect(int(ox + cell), int(oy + cell), int(grid_w - 2 * cell), int(grid_h - 2 * cell))
-        qp.fillRect(center, QColor("#e4eee5"))
+        centre_fill = QLinearGradient(center.topLeft(), center.bottomRight())
+        centre_fill.setColorAt(0, QColor("#f4fbf6"))
+        centre_fill.setColorAt(1, QColor("#cfe8d8"))
         qp.setPen(QColor("#b4c7b8"))
-        qp.drawRect(center)
-        qp.setPen(QColor("#176d5b"))
-        qp.setFont(QFont("Microsoft JhengHei", max(18, int(cell * 0.34)), QFont.Bold))
-        qp.drawText(center.adjusted(12, 20, -12, -center.height() // 2), Qt.AlignCenter, "大富翁")
-        qp.setFont(QFont("Segoe UI", max(10, int(cell * 0.14))))
-        subtitle = "开始一局，争夺城市与交通网络"
-        if board_game is not None and board_game.players:
-            current = board_game._current_player()
-            subtitle = f"第 {board_game.turn} 回合  |  当前：{current.name}"
-        qp.setPen(QColor("#496257"))
-        qp.drawText(center.adjusted(12, center.height() // 2 - 4, -12, -18), Qt.AlignCenter, subtitle)
+        qp.setBrush(centre_fill)
+        qp.drawRoundedRect(center.adjusted(2, 2, -2, -2), 10, 10)
+        if self._hover_tile is not None and self._hover_tile.category in (
+            TileType.PROPERTY, TileType.RAILROAD, TileType.UTILITY,
+        ):
+            self._draw_detail_card(qp, center, self._hover_tile, cell)
+        else:
+            qp.setPen(QColor("#176d5b"))
+            qp.setFont(QFont("Microsoft JhengHei", max(18, int(cell * 0.34)), QFont.Bold))
+            qp.drawText(center.adjusted(12, 20, -12, -center.height() // 2), Qt.AlignCenter, "大富翁")
+            qp.setFont(QFont("Segoe UI", max(10, int(cell * 0.14))))
+            subtitle = "开始一局，争夺城市与交通网络"
+            if board_game is not None and board_game.players:
+                current = board_game._current_player()
+                subtitle = f"第 {board_game.turn} 回合  |  当前：{current.name}"
+            qp.setPen(QColor("#496257"))
+            qp.drawText(center.adjusted(12, center.height() // 2 - 4, -12, -18), Qt.AlignCenter, subtitle)
 
         if board_game is not None:
             board_tiles = board_game.board.tiles
@@ -811,6 +926,9 @@ class MainWindow(QMainWindow):
         self.skip_buy_button.clicked.connect(self.decline_pending_asset)
         self.skip_buy_button.setEnabled(False)
         cb.addWidget(self.skip_buy_button)
+        self.mortgage_button = QPushButton("管理地产（盖房 / 抵押）")
+        self.mortgage_button.clicked.connect(self.open_mortgage_dialog)
+        cb.addWidget(self.mortgage_button)
         b3 = QPushButton("结束回合并运行 AI"); b3.clicked.connect(self.run_bots); cb.addWidget(b3)
         b4 = QPushButton("模拟 30 回合"); b4.clicked.connect(lambda: self.run_bots(limit=30)); cb.addWidget(b4)
         log_title = QLabel("事件记录")
@@ -920,6 +1038,56 @@ class MainWindow(QMainWindow):
         self._after_step()
         if self.game.pending_purchase is None and self._auto_run_allowed():
             QTimer.singleShot(0, lambda: self.run_bots(start_with_human=False))
+
+    def open_mortgage_dialog(self) -> None:
+        """List the human's properties with mortgage / redeem actions."""
+        if not self.game:
+            self.status.setText("请先开始游戏")
+            return
+        human = self.game.players[self.human_index]
+        dialog = QDialog(self)
+        dialog.setWindowTitle("管理地产")
+        layout = QVBoxLayout(dialog)
+        if not human.properties:
+            layout.addWidget(QLabel("你还没有地产"))
+        for tile_index in sorted(human.properties):
+            tile = self.game.board.tiles[tile_index]
+            row = QHBoxLayout()
+            color = _GROUP_COLORS.get(tile.group, "#516158")
+            name = QLabel(f"● {tile.name}" + ("（已抵押）" if tile.mortgaged else "") + (f"  {tile.house}级" if tile.house else ""))
+            name.setStyleSheet(f"color: {color}; font-weight: bold;")
+            row.addWidget(name, 1)
+            actions = []
+            if tile.mortgaged:
+                actions.append((f"赎回 ¥{self.game.redeem_cost(tile):,}", self.game.redeem_tile, True))
+            else:
+                actions.append((f"抵押 +¥{self.game.mortgage_value(tile):,}", self.game.mortgage_tile, True))
+            if tile.category == TileType.PROPERTY:
+                can_build, why_build = self.game.can_build(human, tile_index)
+                can_sell, why_sell = self.game.can_sell_house(human, tile_index)
+                actions.append((f"盖房 -¥{self.game.build_cost(tile):,}", self.game.build_house, can_build, why_build))
+                actions.append((f"卖房 +¥{self.game.sell_value(tile):,}", self.game.sell_house, can_sell, why_sell))
+            for item in actions:
+                label, action, enabled = item[0], item[1], item[2]
+                button = QPushButton(label)
+                if len(item) > 3 and not enabled:
+                    button.setEnabled(False)
+                    button.setToolTip(item[3])
+
+                def run(_checked=False, act=action, idx=tile_index):
+                    ok, message = act(human, idx)
+                    self.status.setText(message)
+                    self._after_bank(ok, message)
+                    self.board_view.update()
+                    dialog.accept()
+                    self.open_mortgage_dialog()
+                button.clicked.connect(run)
+                row.addWidget(button)
+            layout.addLayout(row)
+        close = QPushButton("关闭")
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
 
     def buy_pending_asset(self) -> None:
         if self.game:

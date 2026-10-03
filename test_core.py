@@ -94,7 +94,7 @@ def test_bankrupt_players_properties_return_to_bank_for_resale():
     owner.position = 6
     g._land(owner)
     tile = g.board.tiles[6]
-    tile.house = 2
+    tile.mortgaged = True  # nothing left to liquidate
 
     owner.set_money(0)
     g._check_bankrupt()
@@ -102,7 +102,7 @@ def test_bankrupt_players_properties_return_to_bank_for_resale():
     assert owner.bankrupt
     assert owner.properties == []
     assert tile.owner is None
-    assert tile.house == 0
+    assert tile.house == 0 and not tile.mortgaged
 
     g.auto_buy = False
     buyer.set_money(100000)
@@ -369,8 +369,8 @@ def test_rent_scales_with_houses():
 
     visitor.position = 6
     g._land(visitor)
-    base = g.board.tiles[6].price // 20  # 75
-    expected = base * (1 + 2 * 1)        # 225
+    expected = g.property_rent(g.board.tiles[6])
+    assert expected == g.board.tiles[6].price // g.RENT_DIVISOR * g.RENT_STEPS[1]
     assert visitor.money == 100000 - expected
 
 
@@ -466,3 +466,181 @@ def test_bank_serialised_in_save():
     assert g2.players[0].bank == 5000
     assert g2.players[0].loan == 2000
     assert g2.players[0].loan_age == 0
+
+
+# ------------------------------------------------------- doubles & jail
+def _force_rolls(g, rolls):
+    """Make ``g.roll`` return the given dice pairs in order."""
+    it = iter(rolls)
+
+    def fake_roll():
+        g._last_roll = next(it)
+    g.roll = fake_roll
+
+
+def test_doubles_grant_extra_turn_then_clear():
+    g = make_game(n=2)
+    _force_rolls(g, [(1, 1), (1, 2)])
+    first = g._current_player()
+    g.run_step()
+    assert g.extra_turn is True
+    g.next_turn()
+    assert g._current_player() is first
+    g.run_step()
+    assert g.extra_turn is False
+    g.next_turn()
+    assert g._current_player() is not first
+
+
+def test_third_double_sends_to_jail_without_moving():
+    g = make_game(n=2)
+    p = g._current_player()
+    _force_rolls(g, [(1, 1), (2, 2), (3, 3)])
+    g.run_step(); g.next_turn()
+    g.run_step(); g.next_turn()
+    pos = p.position
+    g.run_step()
+    assert p.in_prison and p.position == pos
+    assert g.extra_turn is False
+
+
+def test_jail_uses_fresh_roll_for_doubles():
+    g = make_game(n=2)
+    p = g._current_player()
+    p.in_prison = True
+    g._last_roll = (1, 1)  # stale doubles must not free the player
+    _force_rolls(g, [(1, 2)])
+    g.run_step()
+    assert p.in_prison
+
+    p.position = 0
+    _force_rolls(g, [(2, 2)])
+    g.run_step()
+    assert not p.in_prison and p.position == 4
+    assert g.extra_turn is False  # freed by doubles: no extra roll
+
+
+# ------------------------------------------------------------- mortgage
+def test_mortgage_and_redeem_cycle():
+    g = make_game(n=2)
+    owner, other = g.players
+    t = g.board.tiles[1]
+    t.owner = owner.name
+    owner.properties.append(1)
+    before = owner.money
+    ok, _ = g.mortgage_tile(owner, 1)
+    assert ok and t.mortgaged and owner.money == before + t.price // 2
+    assert not g.mortgage_tile(owner, 1)[0]
+    assert not g.mortgage_tile(other, 1)[0]
+    ok, _ = g.redeem_tile(owner, 1)
+    assert ok and not t.mortgaged
+    assert owner.money == before - (t.price // 2) // 10
+
+
+def test_mortgaged_tile_collects_no_rent():
+    g = make_game(n=2)
+    owner, visitor = g.players
+    t = g.board.tiles[1]
+    t.owner = owner.name
+    t.mortgaged = True
+    visitor.position = 1
+    before = visitor.money
+    g._land(visitor)
+    assert visitor.money == before
+
+
+def test_cannot_mortgage_with_houses_in_group():
+    g = make_game(n=2)
+    owner = g.players[0]
+    for i in (1, 3):
+        g.board.tiles[i].owner = owner.name
+        owner.properties.append(i)
+    g.board.tiles[3].house = 1
+    assert not g.mortgage_tile(owner, 1)[0]
+
+
+def test_auto_mortgage_prevents_bankruptcy_and_survives_save():
+    g = make_game(n=2)
+    owner = g.players[0]
+    g.board.tiles[39].owner = owner.name
+    owner.properties.append(39)
+    owner.set_money(0)
+    g._check_bankrupt()
+    assert not owner.bankrupt and g.board.tiles[39].mortgaged
+    restored = game_engine.Game.from_dict(g.to_dict())
+    assert restored.board.tiles[39].mortgaged
+
+
+# ----------------------------------------------------------- building
+def _own_group(g, player, indices):
+    for i in indices:
+        g.board.tiles[i].owner = player.name
+        player.properties.append(i)
+
+
+def test_even_building_rule():
+    g = make_game(n=2)
+    p = g.players[0]
+    p.set_money(100000)
+    _own_group(g, p, (6, 8, 9))
+    assert g.build_house(p, 6)[0]
+    assert not g.build_house(p, 6)[0]          # others must catch up first
+    assert g.build_house(p, 8)[0] and g.build_house(p, 9)[0]
+    assert g.build_house(p, 6)[0]
+
+
+def test_cannot_build_without_full_group_or_with_mortgage():
+    g = make_game(n=2)
+    p = g.players[0]
+    p.set_money(100000)
+    _own_group(g, p, (6, 8))
+    assert not g.build_house(p, 6)[0]
+    _own_group(g, p, (9,))
+    g.board.tiles[9].mortgaged = True
+    assert not g.build_house(p, 6)[0]
+
+
+def test_sell_house_is_even_and_refunds_half_cost():
+    g = make_game(n=2)
+    p = g.players[0]
+    p.set_money(100000)
+    _own_group(g, p, (6, 8, 9))
+    for i in (6, 8, 9, 6):
+        g.build_house(p, i)
+    assert not g.sell_house(p, 8)[0]           # tile 6 has the most houses
+    before = p.money
+    assert g.sell_house(p, 6)[0]
+    assert p.money == before + g.board.tiles[6].price // 4
+
+
+def test_bankruptcy_liquidates_houses_before_failing():
+    g = make_game(n=2)
+    p = g.players[0]
+    p.set_money(100000)
+    _own_group(g, p, (6, 8, 9))
+    for i in (6, 8, 9):
+        g.build_house(p, i)
+    p.set_money(0)
+    g._check_bankrupt()
+    assert not p.bankrupt and p.money > 0
+
+
+def test_bot_builds_at_turn_start_but_keeps_reserve():
+    g = make_game(n=2)
+    bot = g.players[0]
+    bot.is_bot = True
+    bot.set_money(20000)
+    _own_group(g, bot, (6, 8, 9))
+    g._bot_manage_assets(bot)
+    assert sum(g.board.tiles[i].house for i in (6, 8, 9)) > 0
+    assert bot.money >= g.BOT_RESERVE
+
+
+def test_rent_ladder_is_monotonic_and_configurable():
+    g = make_game(n=2)
+    t = g.board.tiles[6]
+    rents = []
+    for level in range(5):
+        t.house = level
+        rents.append(g.property_rent(t))
+    assert rents == sorted(rents) and len(set(rents)) == 5

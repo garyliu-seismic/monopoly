@@ -60,6 +60,9 @@ class Game:
         self.pending_purchase: Optional[tuple[Player, Tile]] = None
         self.human_index: int = human_index
         self._last_roll: Tuple[int, int] = (0, 0)
+        self.extra_turn: bool = False
+        self._doubles: int = 0
+        self._creditors: dict = {}
         self._stacks: dict[str, List[str]] = self._build_stacks()
         self.stock_market = StockMarket(seed)
 
@@ -71,6 +74,8 @@ class Game:
         self.phase = "setup"
         self.winner = None
         self.pending_purchase = None
+        self.extra_turn = False
+        self._doubles = 0
         self.stock_market = StockMarket(self._seed)
         for p in self.players:
             p.position = 0
@@ -106,6 +111,12 @@ class Game:
             raise GameOver("turn limit reached, no winner")
         self.turn += 1
         self.stock_market.tick()
+        if self.extra_turn and not self._current_player().bankrupt:
+            # Rolled doubles last turn: same player goes again.
+            self.extra_turn = False
+            return
+        self.extra_turn = False
+        self._doubles = 0
         n = len(self.players)
         for _ in range(n):
             self.turn_index = (self.turn_index + 1) % n
@@ -139,16 +150,37 @@ class Game:
         player = self._current_player()
         if player.bankrupt:
             return self.log
+        if player.is_bot:
+            self._bot_manage_assets(player)
+        rolled = False
         if player.in_prison:
-            if not self._handle_jail_turn(player):
+            outcome = self._handle_jail_turn(player)
+            if outcome == "stay":
                 self._check_bankrupt()
                 self._detect_winner()
                 return self.log
-        self.roll()
+            # Freed this turn: move with the roll already made, no re-roll.
+            rolled = True
+        if not rolled:
+            self.roll()
+        double = is_double(self._last_roll) and not rolled
+        if double and self._doubles + 1 >= 3:
+            self._doubles = 0
+            self.add_log("坐牢", f"{player.name} 连续三次掷出双骰，直接入狱")
+            self._enter_jail(player)
+            self._check_bankrupt()
+            self._detect_winner()
+            return self.log
         self.advance(player, sum(self._last_roll))
         self._land(player)
         self._check_bankrupt()
         self._detect_winner()
+        if double and not player.in_prison and not player.bankrupt and not self.is_won():
+            self._doubles += 1
+            self.extra_turn = True
+            self.add_log("roll", f"{player.name} 掷出双骰，再掷一次")
+        else:
+            self._doubles = 0
         return self.log
 
     def roll(self) -> None:
@@ -162,8 +194,8 @@ class Game:
         after = (before + count) % self.board_size
         player.position = after
         if before + count >= self.board_size:
-            player.add(2500)
-            self.add_log("起点奖金", f"{player.name} 经过起点 +¥2500")
+            player.add(self.GO_BONUS)
+            self.add_log("起点奖金", f"{player.name} 经过起点 +¥{self.GO_BONUS}")
             self.apply_interest(player)
         return after
 
@@ -197,7 +229,7 @@ class Game:
             return
         if t.owner == player.name:
             # 自己的地：拥有整个集团且房屋未满时可继续盖房
-            if self._owns_group(player, t.group) and t.house < 4:
+            if self._owns_group(player, t.group) and t.house < 4 and not t.mortgaged:
                 self._build_house(player, t)
             else:
                 self.add_log("地产", f"{player.name} 回到自己的地产 {t.name}")
@@ -215,25 +247,124 @@ class Game:
         if group_owned:
             return True
         remaining_cash = player.money - t.price
-        reserve = max(4000, t.price // 3)
+        reserve = max(self.BUY_RESERVE_MIN, t.price // 3)
         return remaining_cash >= reserve and t.price <= player.money * 0.9
 
+    # ------------------------------------------------------------ building
+    BOT_RESERVE = 1000
+    MAX_HOUSES = 4  # level 4 is the hotel
+    GO_BONUS = 500
+    BUY_RESERVE_MIN = 1000             # bots keep at least this much after buying
+    RENT_DIVISOR = 5                   # land rent = price // RENT_DIVISOR
+    RENT_STEPS = (1, 3, 6, 10, 15)     # multiplier per house level (4 = hotel)
+
+    @classmethod
+    def property_rent(cls, t: Tile) -> int:
+        """Rent for a property at its current house level."""
+        return t.price // cls.RENT_DIVISOR * cls.RENT_STEPS[min(t.house, cls.MAX_HOUSES)]
+
+    @staticmethod
+    def build_cost(t: Tile) -> int:
+        return t.price // 2
+
+    @staticmethod
+    def sell_value(t: Tile) -> int:
+        return t.price // 4
+
+    def _group_tiles(self, t: Tile) -> List[Tile]:
+        return [o for o in self.board.tiles
+                if o.category == TileType.PROPERTY and o.group == t.group]
+
+    def can_build(self, player: Player, tile_index: int, keep: int = 0) -> tuple[bool, str]:
+        """Why (not) ``player`` may add a house to ``tile_index`` right now."""
+        t = self.board.tile_by_index(tile_index)
+        if t.category != TileType.PROPERTY or t.owner != player.name:
+            return False, "这不是你的地产"
+        if not self._owns_group(player, t.group):
+            return False, "需要先集齐同色地产"
+        group = self._group_tiles(t)
+        if any(o.mortgaged for o in group):
+            return False, "同色地产中有已抵押的，请先赎回"
+        if t.house >= self.MAX_HOUSES:
+            return False, "已经是酒店"
+        if t.house > min(o.house for o in group):
+            return False, "需要均匀建造：先给同色其他地产盖房"
+        cost = self.build_cost(t)
+        if player.money - cost < keep:
+            return False, f"现金不足（需 ¥{cost}）"
+        return True, ""
+
+    def build_house(self, player: Player, tile_index: int, keep: int = 0) -> tuple[bool, str]:
+        """Add one house (level 4 = hotel); even building is enforced."""
+        ok, reason = self.can_build(player, tile_index, keep)
+        if not ok:
+            return False, reason
+        t = self.board.tile_by_index(tile_index)
+        cost = self.build_cost(t)
+        player.pay(cost)
+        t.house += 1
+        level = "酒店" if t.house == self.MAX_HOUSES else f"{t.house} 级房屋"
+        self.add_log("build", f"{player.name} 为 {t.name} 建成 {level}（-¥{cost}）")
+        return True, f"{t.name} 建成 {level}"
+
+    def can_sell_house(self, player: Player, tile_index: int) -> tuple[bool, str]:
+        t = self.board.tile_by_index(tile_index)
+        if t.category != TileType.PROPERTY or t.owner != player.name:
+            return False, "这不是你的地产"
+        if t.house <= 0:
+            return False, "没有可卖的房屋"
+        if t.house < max(o.house for o in self._group_tiles(t)):
+            return False, "需要均匀出售：先卖同色房数最多的地产"
+        return True, ""
+
+    def sell_house(self, player: Player, tile_index: int) -> tuple[bool, str]:
+        """Sell one house back to the bank for half its build cost."""
+        ok, reason = self.can_sell_house(player, tile_index)
+        if not ok:
+            return False, reason
+        t = self.board.tile_by_index(tile_index)
+        value = self.sell_value(t)
+        t.house -= 1
+        if not player.add(value) and player.wallets:
+            player.wallets[0].add(value)
+        self.add_log("build", f"{player.name} 卖出 {t.name} 一级房屋（+¥{value}）")
+        return True, f"卖出 {t.name} 一级房屋，获得 ¥{value}"
+
     def _build_house(self, player: Player, t: object) -> None:
-        cost = int(t.price * 0.5)
-        if player.can_pay(cost) and player.money - cost >= 3000:
-            player.pay(cost)
-            t.house += 1
-            level = "酒店" if t.house == 4 else f"{t.house} 级房屋"
-            self.add_log("build", f"{player.name} 为 {t.name} 建成 {level}（-¥{cost}）")
+        self.build_house(player, t.tile, keep=self.BOT_RESERVE)
+
+    def _bot_manage_assets(self, player: Player) -> None:
+        """Bot housekeeping at turn start: redeem mortgages, then build."""
+        reserve = self.BOT_RESERVE
+        for _ in range(40):
+            mortgaged = sorted(
+                (self.board.tiles[i] for i in player.properties if self.board.tiles[i].mortgaged),
+                key=lambda t: self.redeem_cost(t),
+            )
+            if mortgaged and player.money - self.redeem_cost(mortgaged[0]) >= reserve:
+                self.redeem_tile(player, mortgaged[0].tile)
+                continue
+            options = sorted(
+                (self.board.tiles[i] for i in player.properties
+                 if self.can_build(player, i, keep=reserve)[0]),
+                key=lambda t: (self.build_cost(t), t.house),
+            )
+            if not options:
+                return
+            self.build_house(player, options[0].tile, keep=reserve)
 
     def _pay_rent(self, player: Player, t: object) -> None:
-        base = t.price // 20
-        rent = base * (1 + 2 * t.house)
-        self._collect_rent(player, t.owner, rent)
+        if t.mortgaged:
+            self.add_log("rent", f"{t.name} 已抵押，{player.name} 免交租金")
+            return
+        self._collect_rent(player, t.owner, self.property_rent(t))
 
     def _land_railroad(self, player: Player, t: object) -> None:
         if t.owner is None:
             self._offer_asset_purchase(player, t)
+            return
+        if t.owner != player.name and t.mortgaged:
+            self.add_log("rent", f"{t.name} 已抵押，{player.name} 免交租金")
             return
         if t.owner != player.name:
             owned_railroads = sum(
@@ -246,6 +377,9 @@ class Game:
         if t.owner is None:
             self._offer_asset_purchase(player, t)
             return
+        if t.owner != player.name and t.mortgaged:
+            self.add_log("rent", f"{t.name} 已抵押，{player.name} 免交租金")
+            return
         if t.owner != player.name:
             owned_utilities = sum(
                 tile.category == TileType.UTILITY and tile.owner == t.owner
@@ -253,6 +387,73 @@ class Game:
             )
             multiplier = 100 if owned_utilities == 2 else 40
             self._collect_rent(player, t.owner, multiplier * sum(self._last_roll))
+
+    # ------------------------------------------------------------ mortgage
+    @staticmethod
+    def mortgage_value(t: Tile) -> int:
+        return t.price // 2
+
+    @staticmethod
+    def redeem_cost(t: Tile) -> int:
+        """Mortgage value plus 10% interest."""
+        value = t.price // 2
+        return value + value // 10
+
+    def mortgage_tile(self, player: Player, tile_index: int) -> tuple[bool, str]:
+        """Mortgage an owned, building-free tile for half its price."""
+        t = self.board.tile_by_index(tile_index)
+        if t.owner != player.name:
+            return False, "这不是你的地产"
+        if t.mortgaged:
+            return False, f"{t.name} 已经抵押"
+        group_built = t.group and any(
+            o.house > 0 for o in self.board.tiles
+            if o.category == TileType.PROPERTY and o.group == t.group
+        )
+        if t.house > 0 or group_built:
+            return False, "同色地产上还有房屋，请先卖掉"
+        value = self.mortgage_value(t)
+        t.mortgaged = True
+        if not player.add(value) and player.wallets:
+            player.wallets[0].add(value)
+        self.add_log("mortgage", f"{player.name} 抵押 {t.name}（+¥{value}）")
+        return True, f"抵押 {t.name}，获得 ¥{value}"
+
+    def redeem_tile(self, player: Player, tile_index: int) -> tuple[bool, str]:
+        """Redeem a mortgaged tile for mortgage value + 10%."""
+        t = self.board.tile_by_index(tile_index)
+        if t.owner != player.name:
+            return False, "这不是你的地产"
+        if not t.mortgaged:
+            return False, f"{t.name} 没有被抵押"
+        cost = self.redeem_cost(t)
+        if not player.can_pay(cost):
+            return False, f"现金不足（需 ¥{cost}）"
+        player.pay(cost)
+        t.mortgaged = False
+        self.add_log("mortgage", f"{player.name} 赎回 {t.name}（-¥{cost}）")
+        return True, f"赎回 {t.name}，花费 ¥{cost}"
+
+    def _auto_mortgage(self, player: Player) -> bool:
+        """Raise cash by selling houses, then mortgaging, before bankruptcy."""
+        for _ in range(200):
+            if player.money > 0:
+                return True
+            built = sorted(
+                (self.board.tiles[i] for i in player.properties
+                 if self.board.tiles[i].house > 0),
+                key=lambda t: -t.house,
+            )
+            if built and self.sell_house(player, built[0].tile)[0]:
+                continue
+            raised = False
+            for i in player.properties:
+                if not self.board.tiles[i].mortgaged and self.mortgage_tile(player, i)[0]:
+                    raised = True
+                    break
+            if not raised:
+                break
+        return player.money > 0
 
     def _offer_asset_purchase(self, player: Player, t: object) -> None:
         """Offer an unowned property, railroad, or utility to its lander."""
@@ -402,6 +603,8 @@ class Game:
             if cred is not None:
                 cred.add(paid)
         self.add_log("rent", f"{player.name} 向 {owner} 交租 -{paid}")
+        if owner is not None:
+            self._creditors[player.name] = owner
         self._check_bankrupt()
 
     def _enter_jail(self, player: Player) -> None:
@@ -410,21 +613,20 @@ class Game:
         player.jail_turn = 0
         self.add_log("坐牢", f"{player.name} 入监服刑，需掷骰/付赎金出狱")
 
-    def _handle_jail_turn(self, player: Player) -> bool:
+    def _handle_jail_turn(self, player: Player) -> str:
         """Resolve one turn while imprisoned.
 
-        Returns True when the player releases and may still move this turn,
-        False when they must stay put. Doubling rolls frees you immediately;
-        otherwise a jail day is counted and after JAIL_MAX_TURNS days you may
-        pay BAIL_COST to bail out.
+        Rolls first, then returns ``"doubles"`` (freed, move with this roll),
+        ``"bail"`` (freed by paying, move with this roll) or ``"stay"``.
+        After JAIL_MAX_TURNS days the player must pay BAIL_COST if able.
         """
+        self.roll()
         if is_double(self._last_roll):
             player.in_prison = False
             player.jail_turn = 0
             self.add_log("出狱", f"{player.name} 掷出双骰，提前出狱")
-            return True
+            return "doubles"
 
-        self.roll()
         player.jail_turn += 1
         player.jail_counter += 1
         if player.jail_turn >= JAIL_MAX_TURNS:
@@ -433,10 +635,9 @@ class Game:
                 player.in_prison = False
                 player.jail_turn = 0
                 self.add_log("出狱", f"{player.name} 支付 {BAIL_COST} 元出狱")
-                return True
+                return "bail"
             self.add_log("出狱", f"{player.name} 无力支付赎金，再停留一轮")
-            return False
-        return False
+        return "stay"
 
     def _draw_card(self, player: Player, key: str) -> None:
         name = self._pop_stack(key)
@@ -460,13 +661,31 @@ class Game:
     def _check_bankrupt(self) -> None:
         for pl in self.players:
             if not pl.bankrupt and pl.money == 0 and pl.bank == 0 and pl.wallets:
+                if self._auto_mortgage(pl):
+                    self.add_log("mortgage", f"{pl.name} 现金耗尽，自动抵押地产周转")
+                    continue
                 pl.bankrupt = True
+                creditor = next(
+                    (c for c in self.players
+                     if c.name == self._creditors.get(pl.name) and not c.bankrupt and c is not pl),
+                    None,
+                )
                 for property_id in pl.properties:
                     tile = self.board.tiles[property_id]
-                    tile.owner = None
                     tile.house = 0
+                    if creditor is not None:
+                        tile.owner = creditor.name
+                        creditor.properties.append(property_id)
+                    else:
+                        tile.owner = None
+                        tile.mortgaged = False
                 pl.properties.clear()
-                self.add_log("破产", f"{pl.name} 破产，名下地产已由银行回收")
+                if creditor is not None:
+                    self.add_log("破产", f"{pl.name} 破产，名下地产转给债主 {creditor.name}")
+                else:
+                    self.add_log("破产", f"{pl.name} 破产，名下地产已由银行回收")
+        self._creditors = {k: v for k, v in self._creditors.items()
+                           if not getattr(next((p for p in self.players if p.name == k), None), "bankrupt", True)}
 
     def _detect_winner(self) -> None:
         if self.winner is not None:
@@ -495,6 +714,8 @@ class Game:
             "pending_purchase": pending,
             "log": [[phase, text] for phase, text in self.log],
             "last_roll": list(self._last_roll),
+            "extra_turn": self.extra_turn,
+            "doubles": self._doubles,
             "stacks": {k: list(v) for k, v in self._stacks.items()},
             "max_turns": self.max_turns,
             "auto_buy": self.auto_buy,
@@ -526,6 +747,8 @@ class Game:
             g.pending_purchase = (player, g.board.tiles[tidx]) if player is not None else None
         g.log = [(p, t) for p, t in data.get("log", [])]
         g._last_roll = tuple(data.get("last_roll", [0, 0]))
+        g.extra_turn = bool(data.get("extra_turn", False))
+        g._doubles = int(data.get("doubles", 0))
         g._stacks = {k: list(v) for k, v in data.get("stacks", {}).items()}
         rng_from_json(g._rng, data["rng_state"])
         return g
