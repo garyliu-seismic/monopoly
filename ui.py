@@ -648,7 +648,7 @@ class StockPanel(QWidget):
         self.quote_label.setText(
             "  |  ".join(f"{s.name} ¥{s.price}" for s in market.stocks)
         )
-        human = self.game.players[self.human_index]
+        human = self.game.players[self.human_index]  # human_index updated by step() each turn
         held = [(s.name, human.stocks.get(s.code, 0)) for s in market.stocks]
         held = [(n, c) for n, c in held if c > 0]
         if held:
@@ -663,7 +663,7 @@ class StockPanel(QWidget):
             return
         code = self.stock_combo.currentData()
         shares = self.shares_spin.value()
-        human = self.game.players[self.human_index]
+        human = self.game.players[self.human_index]  # human_index updated by step() each turn
         if is_buy:
             ok, msg = self.game.buy_stock(human, code, shares)
         else:
@@ -728,14 +728,14 @@ class BankPanel(QWidget):
         for i, p in enumerate(self.game.players):
             avatar = PLAYER_AVATARS[i % len(PLAYER_AVATARS)]
             tag = " ⚠️逾期" if p.loan_age >= LOAN_OVERDUE_TURNS else ""
-            me = "（你）" if i == self.human_index else ""
+            me = "（你）" if not p.is_bot else ""
             lines.append(f"{avatar}{p.name}{me}: 存¥{p.bank} 贷¥{p.loan}{tag}")
         self.balance_label.setText("\n".join(lines))
 
     def _act(self, op):
         if self.game is None or self.on_bank is None:
             return
-        p = self.game.players[self.human_index]
+        p = self.game.players[self.human_index]  # human_index updated by step() each turn
         amount = self.amount_spin.value()
         if op == "deposit":
             ok, msg = self.game.deposit(p, amount)
@@ -897,6 +897,15 @@ class MainWindow(QMainWindow):
             board_map = by_key(key)
             self.map_combo.addItem(board_map.name, key)
         cb.addWidget(self.map_combo)
+        # 人工玩家数量选择
+        human_row = QHBoxLayout()
+        human_row.addWidget(QLabel("人工玩家："))
+        self.human_count_combo = QComboBox()
+        for n in (1, 2, 3, 5):
+            self.human_count_combo.addItem(f"{n} 人", n)
+        self.human_count_combo.setCurrentIndex(0)  # 默认 1 人
+        human_row.addWidget(self.human_count_combo, 1)
+        cb.addLayout(human_row)
         self.status = QLabel("状态：等待新局")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("background: #e1eee5; padding: 8px; border-radius: 4px;")
@@ -998,11 +1007,16 @@ class MainWindow(QMainWindow):
         box.addWidget(controls_scroll)
 
     def new_game(self):
-        names = ["玩家1", "玩家2", "玩家3", "玩家4"]
-        # 玩家 1 是你（手动），其余 3 个是 AI
-        players = [Player(name, holds=3) for name in names]
-        for i in range(1, len(players)):
+        n_human = self.human_count_combo.currentData()
+        total = max(n_human + 1, 4)  # 至少 4 名玩家（不足部分补 AI）
+        human_names = [f"玩家{i+1}" for i in range(n_human)]
+        bot_count = total - n_human
+        bot_names = [f"AI-{i+1}" for i in range(bot_count)]
+        all_names = human_names + bot_names
+        players = [Player(name, holds=3) for name in all_names]
+        for i in range(n_human, len(players)):
             players[i].is_bot = True
+        # human_index 指向第一个人工玩家（index 0）
         self.human_index = 0
         board = build_map(by_key(self.map_combo.currentData()))
         self.game = game_engine.Game(players, board=board, seed=1, auto_buy=False)
@@ -1033,7 +1047,7 @@ class MainWindow(QMainWindow):
         self._player_panels = []
         for i, player in enumerate(self.game.players):
             panel = PlayerPanel(
-                player, self.game.board, i == self.human_index,
+                player, self.game.board, not player.is_bot,
                 self.players_grid.parentWidget(),
                 avatar=PLAYER_AVATARS[i % len(PLAYER_AVATARS)],
                 color=PLAYER_COLORS[i % len(PLAYER_COLORS)],
@@ -1042,15 +1056,28 @@ class MainWindow(QMainWindow):
             self.players_grid.addWidget(panel, i, 0, 1, -1)
             self._player_panels.append(panel)
 
+    def _n_human(self) -> int:
+        """Number of human (non-bot) players in the current game."""
+        if self.game is None:
+            return 1
+        return sum(1 for p in self.game.players if not p.is_bot)
+
     def _is_human_turn(self) -> bool:
-        return self.game is not None and self.game._current_player() is self.game.players[self.human_index]
+        """True when the current player is any human (non-bot) player."""
+        if self.game is None:
+            return False
+        return not self.game._current_player().is_bot
 
     def _remaining(self) -> int:
         return sum(1 for p in self.game.players if not p.bankrupt)
 
     def _human_bankrupt(self) -> bool:
         """True when the human player is out of the game."""
-        return self.game is not None and self.game.players[self.human_index].bankrupt
+        """True when ALL human players are bankrupt (game over for humans)."""
+        if self.game is None:
+            return False
+        humans = [p for p in self.game.players if not p.is_bot]
+        return all(p.bankrupt for p in humans)
 
     def _auto_run_allowed(self) -> bool:
         """True when the AI may keep running (game alive and human still in)."""
@@ -1082,7 +1109,9 @@ class MainWindow(QMainWindow):
         if not self._is_human_turn():
             self.status.setText("请先运行 AI 至你的回合")
             return
-        self.status.setText("你正在行动")
+        cur = self.game._current_player()
+        self.human_index = self.game.players.index(cur)
+        self.status.setText(f"{cur.name} 正在行动")
         self._human_log_marker = len(self.game.log)
         self._act_current()
         self._show_human_report = True
@@ -1097,7 +1126,7 @@ class MainWindow(QMainWindow):
             return
         human = self.game.players[self.human_index]
         dialog = QDialog(self)
-        dialog.setWindowTitle("管理地产")
+        dialog.setWindowTitle(f"管理地产 — {human.name}")
         layout = QVBoxLayout(dialog)
         if not human.properties:
             layout.addWidget(QLabel("你还没有地产"))
