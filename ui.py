@@ -982,8 +982,6 @@ class MainWindow(QMainWindow):
             "QPushButton:hover { background: #ffe69c; }"
         )
         cb.addWidget(self.mortgage_button)
-        b3 = QPushButton("结束回合并运行 AI"); b3.clicked.connect(self.run_bots); cb.addWidget(b3)
-        b4 = QPushButton("模拟 30 回合"); b4.clicked.connect(lambda: self.run_bots(limit=30)); cb.addWidget(b4)
         log_title = QLabel("事件记录")
         log_title.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 12px;")
         cb.addWidget(log_title)
