@@ -31,6 +31,7 @@ class Tile:
         price: int = 0,
         owner: Optional[str] = None,
         house: int = 0,
+        mortgaged: bool = False,
     ) -> None:
         self.tile = tile
         self.name = name
@@ -39,6 +40,7 @@ class Tile:
         self.price = price
         self.owner = owner
         self.house = house
+        self.mortgaged = mortgaged
 
     def to_dict(self) -> dict:
         return {
@@ -49,6 +51,7 @@ class Tile:
             "price": self.price,
             "owner": self.owner,
             "house": self.house,
+            "mortgaged": self.mortgaged,
         }
 
     @classmethod
@@ -61,6 +64,7 @@ class Tile:
             data.get("price", 0),
             data.get("owner"),
             data.get("house", 0),
+            data.get("mortgaged", False),
         )
 
 
@@ -132,6 +136,7 @@ class Board:
         for t in self.tiles:
             t.owner = None
             t.house = 0
+            t.mortgaged = False
 
     # ------------------------------------------------------------ serialise
     def to_dict(self) -> dict:
