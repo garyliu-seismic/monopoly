@@ -325,7 +325,8 @@ class Game:
         t = self.board.tile_by_index(tile_index)
         value = self.sell_value(t)
         t.house -= 1
-        player.add(value) or player.wallets[0].add(value)
+        if not player.add(value) and player.wallets:
+            player.wallets[0].add(value)
         self.add_log("build", f"{player.name} 卖出 {t.name} 一级房屋（+¥{value}）")
         return True, f"卖出 {t.name} 一级房屋，获得 ¥{value}"
 
@@ -413,7 +414,8 @@ class Game:
             return False, "同色地产上还有房屋，请先卖掉"
         value = self.mortgage_value(t)
         t.mortgaged = True
-        player.add(value) or player.wallets[0].add(value)
+        if not player.add(value) and player.wallets:
+            player.wallets[0].add(value)
         self.add_log("mortgage", f"{player.name} 抵押 {t.name}（+¥{value}）")
         return True, f"抵押 {t.name}，获得 ¥{value}"
 
@@ -683,7 +685,7 @@ class Game:
                 else:
                     self.add_log("破产", f"{pl.name} 破产，名下地产已由银行回收")
         self._creditors = {k: v for k, v in self._creditors.items()
-                           if not next(p for p in self.players if p.name == k).bankrupt}
+                           if not getattr(next((p for p in self.players if p.name == k), None), "bankrupt", True)}
 
     def _detect_winner(self) -> None:
         if self.winner is not None:
