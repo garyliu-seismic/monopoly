@@ -1072,7 +1072,6 @@ class MainWindow(QMainWindow):
         return sum(1 for p in self.game.players if not p.bankrupt)
 
     def _human_bankrupt(self) -> bool:
-        """True when the human player is out of the game."""
         """True when ALL human players are bankrupt (game over for humans)."""
         if self.game is None:
             return False
@@ -1099,7 +1098,7 @@ class MainWindow(QMainWindow):
         if not self.game:
             self.status.setText("请先开始游戏"); return
         if self._human_bankrupt():
-            self.status.setText("你已破产，游戏结束")
+            self.status.setText("所有人工玩家已破产，游戏结束" if self._n_human() > 1 else "你已破产，游戏结束")
             return
         if self._remaining() == 0:
             return
@@ -1110,7 +1109,7 @@ class MainWindow(QMainWindow):
             self.status.setText("请先运行 AI 至你的回合")
             return
         cur = self.game._current_player()
-        self.human_index = self.game.players.index(cur)
+        self._sync_human_index()
         self.status.setText(f"{cur.name} 正在行动")
         self._human_log_marker = len(self.game.log)
         self._act_current()
@@ -1211,7 +1210,16 @@ class MainWindow(QMainWindow):
             self._play_sounds_for_new_logs()
         self._after_step()
 
+    def _sync_human_index(self) -> None:
+        """Point human_index (and the panels' copies) at the current human player."""
+        if self.game is None or not self._is_human_turn():
+            return
+        self.human_index = self.game.players.index(self.game._current_player())
+        self.stock_panel.human_index = self.human_index
+        self.bank_panel.human_index = self.human_index
+
     def _after_step(self):
+        self._sync_human_index()
         self.log_pane.refresh()
         if self.game is not None:
             self.dice_view.set_values(self.game._last_roll)
